@@ -7,9 +7,12 @@ import Control.Exception
 import Control.Monad
 import Data.Binary.Get
 import Data.Binary.Put
+import Data.Bits
 import Data.IORef
 import Data.Int
+import Data.Foldable
 import Data.Map (Map)
+import Data.Traversable
 import Debug.Trace
 import Network.Socket hiding (send)
 import Network.Socket.ByteString.Lazy
@@ -21,10 +24,7 @@ import qualified Data.ByteString.Char8
 import qualified Data.ByteString.Lazy
 import qualified Data.Map as Map
 import qualified Network.Socket.ByteString
-
 import JavaBinary
-
-import Unsafe.Coerce
 
 type MessageTag = Int8
 
@@ -220,6 +220,10 @@ data Message
 
   deriving (Show, Read)
 
+instance JavaBinary Message where
+  getJ = getMessage
+  putJ = putMessage
+
 data InventoryType
   = BasicInventory
   | WorkbenchInventory
@@ -379,8 +383,8 @@ data BlockId
 
 instance JavaBinary BlockId where
   getJ = do
-    tag <- getWord8
-    case tag of
+    tag <- getJ
+    case tag :: Int8 of
       0x00 -> return Air
       0x01 -> return Stone
       0x02 -> return Grass
@@ -466,99 +470,123 @@ instance JavaBinary BlockId where
       0x5C -> return Cake
       _ -> error ("block id " ++ show tag)
 
-  putJ Air                = putWord8 0x00
-  putJ Stone              = putWord8 0x01
-  putJ Grass              = putWord8 0x02
-  putJ Dirt               = putWord8 0x03
-  putJ Cobblestone        = putWord8 0x04
-  putJ WoodenPlank        = putWord8 0x05
-  putJ Sapling            = putWord8 0x06
-  putJ Bedrock            = putWord8 0x07
-  putJ Water              = putWord8 0x08
-  putJ StationaryWater    = putWord8 0x09
-  putJ Lava               = putWord8 0x0A
-  putJ StationaryLava     = putWord8 0x0B
-  putJ Sand               = putWord8 0x0C
-  putJ Gravel             = putWord8 0x0D
-  putJ Goldore            = putWord8 0x0E
-  putJ Ironore            = putWord8 0x0F
-  putJ Coalore            = putWord8 0x10
-  putJ Wood               = putWord8 0x11
-  putJ Leaves             = putWord8 0x12
-  putJ Sponge             = putWord8 0x13
-  putJ Glass              = putWord8 0x14
-  putJ LapisLazuliOre     = putWord8 0x15
-  putJ LapisLazuliBlock   = putWord8 0x16
-  putJ Dispenser          = putWord8 0x17
-  putJ Sandstone          = putWord8 0x18
-  putJ NoteBlock          = putWord8 0x19
-  putJ Wool               = putWord8 0x23
-  putJ YellowFlower       = putWord8 0x25
-  putJ RedRose            = putWord8 0x26
-  putJ BrownMushroom      = putWord8 0x27
-  putJ RedMushroom        = putWord8 0x28
-  putJ GoldBlock          = putWord8 0x29
-  putJ IronBlock          = putWord8 0x2A
-  putJ DoubleStoneSlab    = putWord8 0x2B
-  putJ StoneSlab          = putWord8 0x2C
-  putJ Brick              = putWord8 0x2D
-  putJ TNT                = putWord8 0x2E
-  putJ Bookshelf          = putWord8 0x2F
-  putJ MossStone          = putWord8 0x30
-  putJ Obsidian           = putWord8 0x31
-  putJ Torch              = putWord8 0x32
-  putJ Fire               = putWord8 0x33
-  putJ MonsterSpawner     = putWord8 0x34
-  putJ WoodenStairs       = putWord8 0x35
-  putJ Chest              = putWord8 0x36
-  putJ RedstoneWire       = putWord8 0x37
-  putJ DiamondOre         = putWord8 0x38
-  putJ DiamondBlock       = putWord8 0x39
-  putJ Workbench          = putWord8 0x3A
-  putJ Crops              = putWord8 0x3B
-  putJ Soil               = putWord8 0x3C
-  putJ Furnace            = putWord8 0x3D
-  putJ BurningFurnace     = putWord8 0x3E
-  putJ SignPost           = putWord8 0x3F
-  putJ WoodenDoor         = putWord8 0x40
-  putJ Ladder             = putWord8 0x41
-  putJ MinecartTracks     = putWord8 0x42
-  putJ CobblestoneStairs  = putWord8 0x43
-  putJ WallSign           = putWord8 0x44
-  putJ Lever              = putWord8 0x45
-  putJ StonePressurePlate = putWord8 0x46
-  putJ IronDoor           = putWord8 0x47
-  putJ WoodenPressurePlate= putWord8 0x48
-  putJ RedstoneOre        = putWord8 0x49
-  putJ GlowingRedstoneOre = putWord8 0x4A
-  putJ RedstoneTorchOff   = putWord8 0x4B
-  putJ RedstoneTorchOn    = putWord8 0x4C
-  putJ StoneButton        = putWord8 0x4D
-  putJ Snow               = putWord8 0x4E
-  putJ Ice                = putWord8 0x4F
-  putJ SnowBlock          = putWord8 0x50
-  putJ Cactus             = putWord8 0x51
-  putJ Clay               = putWord8 0x52
-  putJ SugarCane          = putWord8 0x53
-  putJ Jukebox            = putWord8 0x54
-  putJ Fence              = putWord8 0x55
-  putJ Pumpkin            = putWord8 0x56
-  putJ Netherrack         = putWord8 0x57
-  putJ SoulSand           = putWord8 0x58
-  putJ Glowstone          = putWord8 0x59
-  putJ Portal             = putWord8 0x5A
-  putJ JackOLantern       = putWord8 0x5B
-  putJ Cake               = putWord8 0x5C
+  putJ Air                = putJ (0x00 :: Int8)
+  putJ Stone              = putJ (0x01 :: Int8)
+  putJ Grass              = putJ (0x02 :: Int8)
+  putJ Dirt               = putJ (0x03 :: Int8)
+  putJ Cobblestone        = putJ (0x04 :: Int8)
+  putJ WoodenPlank        = putJ (0x05 :: Int8)
+  putJ Sapling            = putJ (0x06 :: Int8)
+  putJ Bedrock            = putJ (0x07 :: Int8)
+  putJ Water              = putJ (0x08 :: Int8)
+  putJ StationaryWater    = putJ (0x09 :: Int8)
+  putJ Lava               = putJ (0x0A :: Int8)
+  putJ StationaryLava     = putJ (0x0B :: Int8)
+  putJ Sand               = putJ (0x0C :: Int8)
+  putJ Gravel             = putJ (0x0D :: Int8)
+  putJ Goldore            = putJ (0x0E :: Int8)
+  putJ Ironore            = putJ (0x0F :: Int8)
+  putJ Coalore            = putJ (0x10 :: Int8)
+  putJ Wood               = putJ (0x11 :: Int8)
+  putJ Leaves             = putJ (0x12 :: Int8)
+  putJ Sponge             = putJ (0x13 :: Int8)
+  putJ Glass              = putJ (0x14 :: Int8)
+  putJ LapisLazuliOre     = putJ (0x15 :: Int8)
+  putJ LapisLazuliBlock   = putJ (0x16 :: Int8)
+  putJ Dispenser          = putJ (0x17 :: Int8)
+  putJ Sandstone          = putJ (0x18 :: Int8)
+  putJ NoteBlock          = putJ (0x19 :: Int8)
+  putJ Wool               = putJ (0x23 :: Int8)
+  putJ YellowFlower       = putJ (0x25 :: Int8)
+  putJ RedRose            = putJ (0x26 :: Int8)
+  putJ BrownMushroom      = putJ (0x27 :: Int8)
+  putJ RedMushroom        = putJ (0x28 :: Int8)
+  putJ GoldBlock          = putJ (0x29 :: Int8)
+  putJ IronBlock          = putJ (0x2A :: Int8)
+  putJ DoubleStoneSlab    = putJ (0x2B :: Int8)
+  putJ StoneSlab          = putJ (0x2C :: Int8)
+  putJ Brick              = putJ (0x2D :: Int8)
+  putJ TNT                = putJ (0x2E :: Int8)
+  putJ Bookshelf          = putJ (0x2F :: Int8)
+  putJ MossStone          = putJ (0x30 :: Int8)
+  putJ Obsidian           = putJ (0x31 :: Int8)
+  putJ Torch              = putJ (0x32 :: Int8)
+  putJ Fire               = putJ (0x33 :: Int8)
+  putJ MonsterSpawner     = putJ (0x34 :: Int8)
+  putJ WoodenStairs       = putJ (0x35 :: Int8)
+  putJ Chest              = putJ (0x36 :: Int8)
+  putJ RedstoneWire       = putJ (0x37 :: Int8)
+  putJ DiamondOre         = putJ (0x38 :: Int8)
+  putJ DiamondBlock       = putJ (0x39 :: Int8)
+  putJ Workbench          = putJ (0x3A :: Int8)
+  putJ Crops              = putJ (0x3B :: Int8)
+  putJ Soil               = putJ (0x3C :: Int8)
+  putJ Furnace            = putJ (0x3D :: Int8)
+  putJ BurningFurnace     = putJ (0x3E :: Int8)
+  putJ SignPost           = putJ (0x3F :: Int8)
+  putJ WoodenDoor         = putJ (0x40 :: Int8)
+  putJ Ladder             = putJ (0x41 :: Int8)
+  putJ MinecartTracks     = putJ (0x42 :: Int8)
+  putJ CobblestoneStairs  = putJ (0x43 :: Int8)
+  putJ WallSign           = putJ (0x44 :: Int8)
+  putJ Lever              = putJ (0x45 :: Int8)
+  putJ StonePressurePlate = putJ (0x46 :: Int8)
+  putJ IronDoor           = putJ (0x47 :: Int8)
+  putJ WoodenPressurePlate= putJ (0x48 :: Int8)
+  putJ RedstoneOre        = putJ (0x49 :: Int8)
+  putJ GlowingRedstoneOre = putJ (0x4A :: Int8)
+  putJ RedstoneTorchOff   = putJ (0x4B :: Int8)
+  putJ RedstoneTorchOn    = putJ (0x4C :: Int8)
+  putJ StoneButton        = putJ (0x4D :: Int8)
+  putJ Snow               = putJ (0x4E :: Int8)
+  putJ Ice                = putJ (0x4F :: Int8)
+  putJ SnowBlock          = putJ (0x50 :: Int8)
+  putJ Cactus             = putJ (0x51 :: Int8)
+  putJ Clay               = putJ (0x52 :: Int8)
+  putJ SugarCane          = putJ (0x53 :: Int8)
+  putJ Jukebox            = putJ (0x54 :: Int8)
+  putJ Fence              = putJ (0x55 :: Int8)
+  putJ Pumpkin            = putJ (0x56 :: Int8)
+  putJ Netherrack         = putJ (0x57 :: Int8)
+  putJ SoulSand           = putJ (0x58 :: Int8)
+  putJ Glowstone          = putJ (0x59 :: Int8)
+  putJ Portal             = putJ (0x5A :: Int8)
+  putJ JackOLantern       = putJ (0x5B :: Int8)
+  putJ Cake               = putJ (0x5C :: Int8)
 
-data Metadata = UnknownMetadata [Int8]
+data Metadata = Metadata [MetadataEntry]
  deriving (Show, Read)
 
+data MetadataEntry
+  = MetadataByte Int8
+  | MetadataShort Int16
+  | MetadataInt Int32
+  | MetadataFloat Float
+  | MetadataString String
+  | MetadataTriple (Int16, Int8, Int16)
+  deriving (Show, Read)
+
 instance JavaBinary Metadata where
-  getJ = UnknownMetadata `fmap` aux
-    where aux = do tag <- getWord8
-                   if tag == 127 then return [] else liftM2 (:) getJ aux
-  putJ (UnknownMetadata []) = putWord8 127
-  putJ (UnknownMetadata (x:xs)) = putWord8 0 >> putJ x >> putJ (UnknownMetadata xs)
+  getJ = Metadata <$> aux
+    where aux = do
+            tag <- getJ :: Get Int8
+            if tag == 127 then return []
+             else (:) <$> case tag `shiftR` 5 of
+                            0 -> MetadataByte   <$> getJ
+                            1 -> MetadataShort  <$> getJ
+                            2 -> MetadataInt    <$> getJ
+                            3 -> MetadataFloat  <$> getJ
+                            4 -> MetadataString <$> getJ
+                            5 -> MetadataTriple <$> getJ
+                            _ -> error $ "Unknown metadata tag " ++ show tag
+                      <*> aux
+  putJ (Metadata xs) = traverse aux xs *> putJ (127 :: Int8)
+    where aux (MetadataByte   x) = putJ (0 :: Int8) *> putJ x
+          aux (MetadataShort  x) = putJ (1 :: Int8) *> putJ x
+          aux (MetadataInt    x) = putJ (2 :: Int8) *> putJ x
+          aux (MetadataFloat  x) = putJ (3 :: Int8) *> putJ x
+          aux (MetadataString x) = putJ (4 :: Int8) *> putJ x
+          aux (MetadataTriple x) = putJ (5 :: Int8) *> putJ x
 
 data Action
   = ActionCrouch
@@ -650,7 +678,20 @@ instance JavaBinary Face where
   putJ X1   = putJ (4  :: Int8)
   putJ X2   = putJ (5  :: Int8)
 
+-- | Get a lazy ByteString prefixed with a 32-bit length.
+getLazyByteString32 :: Get Data.ByteString.Lazy.ByteString
 getLazyByteString32 = getLazyByteString . fromIntegral =<< getWord32be
+
+getItemTriple :: Get (Maybe (Int16, Int8, Int16))
+getItemTriple = do
+  itemid <- getJ
+  if itemid == (-1) then return Nothing
+    else Just <$> ((itemid,,) <$> getJ <*> getJ)
+
+putItemTriple :: Maybe (Int16, Int8, Int16) -> Put
+putItemTriple Nothing = putJ (-1 :: Int16)
+putItemTriple (Just x) = putJ x
+
 
 getMessage = do
   tag <- getJ
@@ -726,17 +767,6 @@ getMessage = do
                                  <*> getString <*> getString <*> getString
     0xff -> Disconnect           <$> getString
     _ -> error $ "Unknown packet " ++ show tag
-
-getItemTriple :: Get (Maybe (Int16, Int8, Int16))
-getItemTriple = do
-  itemid <- getJ
-  if itemid == (-1) then return Nothing
-    else Just <$> ((itemid,,) <$> getJ <*> getJ)
-
-putItemTriple :: Maybe (Int16, Int8, Int16) -> Put
-putItemTriple Nothing = putWord16be (-1)
-putItemTriple (Just (itemid, count, uses)) =
-  putJ itemid *> putJ count *> putJ uses 
 
 putMessage KeepAliv = putJ (0x00 :: MessageTag)
 putMessage (LoginRequest ver usr pw x y) = do
@@ -980,9 +1010,9 @@ putMessage (MultiblockChange x z coords tys metas) = do
   putJ x
   putJ z
   putWord16be (fromIntegral (length coords))
-  mapM_ putJ coords
-  mapM_ putJ tys
-  mapM_ putJ metas
+  traverse_ putJ coords
+  traverse_ putJ tys
+  traverse_ putJ metas
 
 putMessage (BlockChange x y z ty meta) = do
   putJ (0x35 :: MessageTag)
@@ -1007,7 +1037,7 @@ putMessage (Explosion x y z r xs) = do
   putJ z
   putJ r
   putWord32be (fromIntegral (length xs) `div` 3)
-  mapM_ putJ xs
+  traverse_ putJ xs
   
 putMessage (OpenWindow wid ty title slots) = do
   putJ (0x64 :: MessageTag)
@@ -1038,7 +1068,7 @@ putMessage (WindowItems win xs) = do
   putJ (0x68 :: MessageTag)
   putJ win
   putWord16be (fromIntegral (length xs))
-  mapM_ putItemTriple xs  
+  traverse_ putItemTriple xs  
 
 putMessage (UpdateProgressBar win bar val) = do
   putJ (0x69 :: MessageTag)
@@ -1078,7 +1108,7 @@ putString xs = do
 
 splitMessage :: Data.ByteString.Lazy.ByteString ->
                 (Message, Data.ByteString.Lazy.ByteString)
-splitMessage = runGet $ liftM2 (,) getMessage getRemainingLazyByteString
+splitMessage = runGet $ liftM2 (,) getJ getRemainingLazyByteString
 
 main = do
   [host, port] <- getArgs
@@ -1197,5 +1227,6 @@ outboundLogic follow emap inchan msg = do
 
 proxy1 label bs sock f = do
   let (msg, bs') = splitMessage bs
-  mapM_ (writeChan sock . runPut . putMessage) =<< f msg
+  msgs <- f msg
+  unless (null msgs) $ writeChan sock $ runPut $ traverse_ putMessage msgs
   proxy1 label bs' sock f
