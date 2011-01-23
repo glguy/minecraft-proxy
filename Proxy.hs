@@ -2,10 +2,12 @@ module Main where
 
 import Protocol
 
+import Codec.Compression.Zlib
 import Control.Concurrent
 import Control.Exception
 import Control.Monad
 import Data.Binary.Put (runPut)
+import qualified Data.ByteString.Lazy as L
 import Data.ByteString.Lazy (ByteString)
 import Data.Foldable
 import Data.IORef
@@ -73,7 +75,7 @@ proxy c s = do
 
 -- | Update the state of the entity map and return the Entity ID
 -- of the entity that changed, if any.
-updateEntityMap :: IORef EntityMap -> IO (Maybe Int32)
+updateEntityMap :: IORef EntityMap -> Message -> IO (Maybe Int32)
 updateEntityMap emap (NamedEntitySpawn eid name x y z _ _ _) = do
   atomicModifyIORef_ emap $ Map.insert eid (Left name, x, y, z)
   return (Just eid)
@@ -108,7 +110,7 @@ updateEntityMap _ _ = return Nothing
 
 
 inboundLogic :: IORef (Maybe Int32) ->
-                IORef  ->
+                IORef EntityMap ->
                 Message ->
                 IO [Message]
 inboundLogic follow emap msg = do
