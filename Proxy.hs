@@ -5,19 +5,21 @@ import Protocol
 import Control.Concurrent
 import Control.Exception
 import Control.Monad
-import Data.ByteString.Lazy (ByteString)
 import Data.Binary.Put (runPut)
+import Data.ByteString.Lazy (ByteString)
 import Data.Foldable
 import Data.IORef
 import Data.Int
 import Data.Map (Map)
-import qualified Network
 import Network.Socket hiding (send)
 import Network.Socket.ByteString.Lazy
 import Prelude hiding (getContents)
 import System.Environment
 import System.Exit
 import qualified Data.Map as Map
+import qualified Network
+
+type EntityMap = Map Int32 (Either String MobId, Int32, Int32, Int32)
 
 main :: IO ()
 main = do
@@ -54,7 +56,7 @@ proxy c s = do
   schan <- newChan
   _ <- forkIO $ do
           sbs <- getContents s
-          proxy1 "inbound" sbs chan (inboundLogic follow emap)
+          proxy1 sbs chan (inboundLogic follow emap)
          `finally` putMVar var "inbound"
   _ <- forkIO $ forever (sendAll c =<< readChan chan )
                   `finally` putMVar var "inbound network" 
@@ -62,15 +64,51 @@ proxy c s = do
                  `finally` putMVar var "outbound network" 
   _ <- forkIO $ do
           cbs <- getContents c
-          proxy1 "outbound" cbs schan (outboundLogic follow emap)
+          proxy1 cbs schan (outboundLogic follow emap)
          `finally` putMVar var "outbound"
   who <- takeMVar var
   putStr who
   putStrLn " died"
   exitFailure
 
+-- | Update the state of the entity map and return the Entity ID
+-- of the entity that changed, if any.
+updateEntityMap :: IORef EntityMap -> IO (Maybe Int32)
+updateEntityMap emap (NamedEntitySpawn eid name x y z _ _ _) = do
+  atomicModifyIORef_ emap $ Map.insert eid (Left name, x, y, z)
+  return (Just eid)
+
+updateEntityMap emap (MobSpawn eid ty x y z _ _ _) = do
+  atomicModifyIORef_ emap $ Map.insert eid (Right ty, x, y, z)
+  return (Just eid)
+
+updateEntityMap emap (EntityTeleport eid x y z _ _) = do
+  atomicModifyIORef_ emap $ Map.update (\ (ty,_,_,_) -> Just (ty, x, y, z)) eid
+  return (Just eid)
+
+updateEntityMap emap (EntityRelativeMove eid dX dY dZ) = do
+  atomicModifyIORef_ emap
+         $ Map.update (\ (ty,x,y,z) -> Just (ty, x + fromIntegral dX,
+                                                 y + fromIntegral dY,
+                                                 z + fromIntegral dZ)) eid
+  return (Just eid)
+
+updateEntityMap emap (EntityLookMove eid dX dY dZ _ _) = do
+  atomicModifyIORef_ emap
+         $ Map.update (\ (ty,x,y,z) -> Just (ty, x + fromIntegral dX,
+                                                 y + fromIntegral dY,
+                                                 z + fromIntegral dZ)) eid
+  return (Just eid)
+
+updateEntityMap emap (DestroyEntity eid) = do
+  atomicModifyIORef_ emap $ Map.delete eid
+  return (Just eid)
+
+updateEntityMap _ _ = return Nothing
+
+
 inboundLogic :: IORef (Maybe Int32) ->
-                IORef (Map Int32 (Either String MobId, Int32, Int32, Int32)) ->
+                IORef  ->
                 Message ->
                 IO [Message]
 inboundLogic follow emap msg = do
@@ -86,34 +124,9 @@ inboundLogic follow emap msg = do
     TimeUpdate {} -> return ()
     Mapchunk {} -> return ()
     _ -> putStrLn $ "inbound: " ++ show msg
-  changedEid <- case msg of
-    NamedEntitySpawn eid name x y z _ _ _ -> do
-      atomicModifyIORef_ emap $ Map.insert eid (Left name,x :: Int32 ,y :: Int32,z :: Int32)
-      return (Just eid)
-    MobSpawn eid ty x y z _ _ _ -> do
-      atomicModifyIORef_ emap $ Map.insert eid (Right ty, x :: Int32 ,y :: Int32,z :: Int32)
-      return (Just eid)
-    EntityTeleport eid x y z _ _ -> do
-      atomicModifyIORef_ emap
-         $ Map.update (\ (ty,_,_,_) -> Just (ty, x, y, z)) eid
-      return (Just eid)
-    EntityRelativeMove eid dX dY dZ -> do
-      atomicModifyIORef_ emap
-         $ Map.update (\ (ty,x,y,z) -> Just (ty, x + fromIntegral dX,
-                                                 y + fromIntegral dY,
-                                                 z + fromIntegral dZ)) eid
-      return (Just eid)
-    EntityLookMove eid dX dY dZ _ _ -> do
-      atomicModifyIORef_ emap
-         $ Map.update (\ (ty,x,y,z) -> Just (ty, x + fromIntegral dX,
-                                                 y + fromIntegral dY,
-                                                 z + fromIntegral dZ)) eid
-      return (Just eid)
-    DestroyEntity eid -> do
-      atomicModifyIORef_ emap $ Map.delete eid
-      return Nothing
-    _ -> return Nothing
-  
+
+  changedEid <- updateEntityMap emap msg
+
   interested <- readIORef follow
   case interested of
     Just ieid | interested == changedEid -> do
@@ -124,11 +137,8 @@ inboundLogic follow emap msg = do
        _ -> return [msg]
     _ -> return [msg]
      
-atomicModifyIORef_ :: IORef a -> (a -> a) -> IO ()
-atomicModifyIORef_ v f = atomicModifyIORef v $ \ x -> (f x, ())
-
 outboundLogic :: IORef (Maybe Int32) ->
-                 IORef (Map Int32 (Either String MobId, Int32, Int32, Int32)) ->
+                 IORef EntityMap ->
                  Message ->
                  IO [Message]
 outboundLogic follow emap msg = do
@@ -150,10 +160,16 @@ outboundLogic follow emap msg = do
     _ -> do putStrLn $ "outbound: " ++ show msg
             return [msg]
 
-proxy1 :: String -> ByteString -> Chan ByteString -> (Message -> IO [Message])
+-- | Read a message from the ByteString, process it with the given
+-- continuation, and serialize all resulting mesages to the given channel.
+proxy1 :: ByteString -> Chan ByteString -> (Message -> IO [Message])
        -> IO a
-proxy1 label bs sock f = do
+proxy1 bs sock f = do
   let (msg, bs') = splitMessage bs
   msgs <- f msg
   unless (null msgs) $ writeChan sock $ runPut $ traverse_ putMessage msgs
-  proxy1 label bs' sock f
+  proxy1 bs' sock f
+
+atomicModifyIORef_ :: IORef a -> (a -> a) -> IO ()
+atomicModifyIORef_ v f = atomicModifyIORef v $ \ x -> (f x, ())
+
