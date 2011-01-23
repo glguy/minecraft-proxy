@@ -19,7 +19,7 @@ instance JavaBinary Int8 where
 
 instance JavaBinary Int16 where
   getJ = fromIntegral <$> getWord16be
-  putJ = putWord32be . fromIntegral
+  putJ = putWord16be . fromIntegral
 
 instance JavaBinary Int32 where
   getJ = fromIntegral <$> getWord32be
