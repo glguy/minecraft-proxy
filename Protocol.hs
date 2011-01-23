@@ -1,0 +1,1201 @@
+{-# LANGUAGE TupleSections #-}
+module Main where
+
+import Control.Applicative
+import Control.Concurrent
+import Control.Exception
+import Control.Monad
+import Data.Binary.Get
+import Data.Binary.Put
+import Data.IORef
+import Data.Int
+import Data.Map (Map)
+import Debug.Trace
+import Network.Socket hiding (send)
+import Network.Socket.ByteString.Lazy
+import Prelude hiding (getContents)
+import System.Environment
+import System.Exit
+import qualified Data.ByteString
+import qualified Data.ByteString.Char8
+import qualified Data.ByteString.Lazy
+import qualified Data.Map as Map
+import qualified Network.Socket.ByteString
+
+import JavaBinary
+
+import Unsafe.Coerce
+
+type MessageTag = Int8
+
+data Message
+
+  = KeepAliv -- ^ Keep alives are sent every 1200 ticks
+
+  | LoginRequest Int32  -- ^ Protocol Version
+                 String -- ^ Username
+                 String -- ^ Password
+                 Int64  -- ^ Map Seed
+                 Int8   -- ^ Dimension
+
+  | Handshake    String -- ^ Username
+
+  | Chat         String -- ^ Message
+
+  | TimeUpdate   Int64 -- ^ The world time in minutes
+
+  | EntityEquipment Int32 -- ^ Entity ID
+                    Int16 -- ^ Slot
+                    Int16 -- ^ Item ID
+                    Int16 -- ^ Damage?
+
+  | SpawnPosition Int32 -- ^ X
+                  Int32 -- ^ Y
+                  Int32 -- ^ Z
+
+  | UseEntity Int32 -- ^ User
+              Int32 -- ^ Target
+              Bool -- ^ Left-click?
+
+  | UpdateHealth Int16 -- ^ Health: 0--20
+
+  | Respawn
+
+  | Player Bool -- ^ On Ground
+
+  | PlayerPosition Double -- ^ X
+                   Double -- ^ Y
+                   Double -- ^ Stance
+                   Double -- ^ Z
+                   Bool   -- ^ On ground
+
+  | PlayerLook Float -- ^ Yaw
+               Float -- ^ Pitch
+               Bool -- ^ On Ground
+
+  | PlayerPositionLook
+                   Double -- ^ X
+                   Double -- ^ Y
+                   Double -- ^ Stance
+                   Double -- ^ Z
+                   Float -- ^ Yaw
+                   Float -- ^ Pitch
+                   Bool -- ^ On Ground
+
+  | PlayerDigging DiggingStatus
+                  Int32 -- ^ X
+                  Int8 -- ^ Y
+                  Int32 -- ^ Z
+                  Face
+
+  | PlayerBlockPlacement
+                  Int32 -- ^ X
+                  Int8 -- ^ Y
+                  Int32 -- ^ Z
+                  Face
+                  (Maybe (Int16, Int8, Int16)) -- ^ Optional block, count, and use
+
+  | HoldingChange Int16 -- ^ Slot
+
+  | Animation Int32 -- ^ Player ID
+              Animate
+
+  | EntityAction Int32 -- ^ Player ID
+                 Action
+
+  | NamedEntitySpawn Int32 -- ^ Player ID
+                     String -- ^ Player Name
+                     Int32 -- ^ X
+                     Int32 -- ^ Y
+                     Int32 -- ^ Z
+                     Int8 -- ^ Rotation
+                     Int8 -- ^ Pitch
+                     Int16 -- ^ Current Item
+
+  | PickupSpawn Int32 -- ^ Entity ID
+                Int16 -- ^ Item ID
+                Int8  -- ^ Count
+                Int16  -- ^ Damage?
+                Int32 -- ^ X
+                Int32 -- ^ Y
+                Int32 -- ^ Z
+                Int8 -- ^ Rotation
+                Int8 -- ^ Pitch
+                Int8 -- ^ Roll
+
+  | CollectItem Int32 -- ^ Collected
+                Int32 -- ^ Collector
+
+  | AddObject Int32 -- ^ Entity ID
+              Int8  -- ^ Type ID
+              Int32 -- ^ X
+              Int32 -- ^ Y
+              Int32 -- ^ Z
+
+  | MobSpawn Int32 -- ^ Entity ID
+             MobId -- ^ Mob ID
+             Int32 -- ^ X
+             Int32 -- ^ Y
+             Int32 -- ^ Z
+             Int8  -- ^ Yaw
+             Int8  -- ^ Pitch
+             Metadata
+
+  | Painting Int32 -- ^ Entity ID
+             String -- ^ Name of painting
+             Int32 -- ^ X
+             Int32 -- ^ Y
+             Int32 -- ^ Z
+             Int32 -- ^ Graphic ID
+
+  | EntityVelocity Int32 -- ^ Entity ID
+                   Int16 -- ^ X Velocity
+                   Int16 -- ^ Y Velocity
+                   Int16 -- ^ Z Velocity
+
+  | DestroyEntity Int32 -- ^ Entity ID
+
+  | Entity Int32 -- ^ Entity ID
+
+  | EntityRelativeMove Int32 -- ^ Entity ID
+                       Int8 -- ^ Change in X
+                       Int8 -- ^ Change in Y
+                       Int8 -- ^ Change in Z
+
+  | EntityLook Int32 -- ^ Entity ID
+               Int8 -- ^ Yaw
+               Int8 -- ^ Pitch
+  | EntityLookMove Int32 -- ^ Entity ID
+                   Int8  -- ^ dX
+                   Int8  -- ^ dY
+                   Int8  -- ^ dZ
+                   Int8  -- ^ Yaw
+                   Int8  -- ^ Pitch
+  | EntityTeleport Int32 -- ^ Entity ID
+                   Int32 -- ^ X
+                   Int32 -- ^ Y
+                   Int32 -- ^ Z
+                   Int8  -- ^ Yaw
+                   Int8  -- ^ Pitch
+  | EntityStatus Int32 -- ^ Entity ID
+                 Int8 -- ^ Status
+  | AttachEntity Int32 -- ^ Entity ID
+                 Int32 -- ^ Vehicle ID
+  | EntityMetadata Int32 Metadata
+  | Prechunk Int32 -- ^ X
+             Int32 -- ^ Z
+             Bool  -- ^ Load on True, Unload on False
+  | Mapchunk Int32 Int16 Int32 Int8 Int8 Int8 Data.ByteString.Lazy.ByteString
+  | MultiblockChange Int32 Int32 [Int16] [BlockId] [Int8]
+  | BlockChange Int32 Int8 Int32 BlockId Int8
+  | PlayNote Int32 Int16 Int32 Int8 Int8
+  | Explosion Double Double Double Float [(Int8,Int8,Int8)]
+  | OpenWindow Int8 -- ^ Window ID
+               InventoryType
+               String -- ^ Title
+               Int8 -- ^ Number of slots
+  | CloseWindow Int8 -- ^ Window ID
+  | WindowClick Int8 Int16 Int8 Int16 (Maybe (Int16, Int8, Int16))
+  | SetSlot Int8 -- ^ Window ID
+            Int16 -- ^ Slot ID
+            (Maybe (Int16, Int8, Int16)) -- ^ Item, Count and Use
+
+  | WindowItems Int8 -- ^ Window ID
+                [Maybe (Int16, Int8, Int16)] -- ^ List of slots (Item ID, Count, Uses)
+  | UpdateProgressBar Int8 -- ^ Window ID
+                      Int16 -- ^ Progress bar ID
+                      Int16 -- ^ Value
+  | Transaction Int8 -- ^ Window ID
+                Int16 -- ^ Action Number
+                Bool -- ^ Success
+  | UpdateSign Int32 -- ^ X
+               Int16 -- ^ Y
+               Int32 -- ^ Z
+               String -- ^ Text on line 1
+               String -- ^ Text on line 2
+               String -- ^ Text on line 3
+               String -- ^ Text on line 4
+
+  | Disconnect   String -- ^ Reason
+
+  deriving (Show, Read)
+
+data InventoryType
+  = BasicInventory
+  | WorkbenchInventory
+  | FurnaceInventory
+  | DispenserInventory
+  deriving (Show, Read)
+
+instance JavaBinary InventoryType where
+  getJ = do
+    tag <- getJ
+    case tag :: Int8 of
+      0 -> return BasicInventory
+      1 -> return WorkbenchInventory
+      2 -> return FurnaceInventory
+      3 -> return DispenserInventory
+      _ -> error ("Unknown inventory " ++ show tag)
+
+  putJ BasicInventory     = putJ (0 :: Int8)
+  putJ WorkbenchInventory = putJ (1 :: Int8)
+  putJ FurnaceInventory   = putJ (2 :: Int8)
+  putJ DispenserInventory = putJ (3 :: Int8)
+
+
+data MobId
+  = Creeper
+  | Skeleton
+  | Spider
+  | GiantSpider
+  | Zombie
+  | Slime
+  | Ghast
+  | ZombiePigman
+  | Pig
+  | Sheep
+  | Cow
+  | Hen
+  | OtherMob Int8
+  deriving (Show, Read)
+
+instance JavaBinary MobId where
+
+  getJ = do
+    tag <- getJ
+    case tag of 
+      50 -> return Creeper
+      51 -> return Skeleton
+      52 -> return Spider
+      53 -> return GiantSpider
+      54 -> return Zombie
+      55 -> return Slime
+      56 -> return Ghast
+      57 -> return ZombiePigman
+      90 -> return Pig
+      91 -> return Sheep
+      92 -> return Cow
+      93 -> return Hen
+      _  -> return $ OtherMob tag
+  putJ Creeper        = putJ (50 :: Int8)
+  putJ Skeleton       = putJ (51 :: Int8)
+  putJ Spider         = putJ (52 :: Int8)
+  putJ GiantSpider    = putJ (53 :: Int8)
+  putJ Zombie         = putJ (54 :: Int8)
+  putJ Slime          = putJ (55 :: Int8)
+  putJ Ghast          = putJ (56 :: Int8)
+  putJ ZombiePigman   = putJ (57 :: Int8)
+  putJ Pig            = putJ (90 :: Int8)
+  putJ Sheep          = putJ (91 :: Int8)
+  putJ Cow            = putJ (92 :: Int8)
+  putJ Hen            = putJ (93 :: Int8)
+  putJ (OtherMob tag) = putJ (tag :: Int8)
+
+data BlockId
+  = Air
+  | Stone
+  | Grass
+  | Dirt
+  | Cobblestone
+  | WoodenPlank
+  | Sapling
+  | Bedrock
+  | Water
+  | StationaryWater
+  | Lava
+  | StationaryLava
+  | Sand
+  | Gravel
+  | Goldore
+  | Ironore
+  | Coalore
+  | Wood
+  | Leaves
+  | Sponge
+  | Glass
+  | LapisLazuliOre
+  | LapisLazuliBlock
+  | Dispenser
+  | Sandstone
+  | NoteBlock
+  | Wool
+  | YellowFlower
+  | RedRose
+  | BrownMushroom
+  | RedMushroom
+  | GoldBlock
+  | IronBlock
+  | DoubleStoneSlab
+  | StoneSlab
+  | Brick
+  | TNT
+  | Bookshelf
+  | MossStone
+  | Obsidian
+  | Torch
+  | Fire
+  | MonsterSpawner
+  | WoodenStairs
+  | Chest
+  | RedstoneWire
+  | DiamondOre
+  | DiamondBlock
+  | Workbench
+  | Crops
+  | Soil
+  | Furnace
+  | BurningFurnace
+  | SignPost
+  | WoodenDoor
+  | Ladder
+  | MinecartTracks
+  | CobblestoneStairs
+  | WallSign
+  | Lever
+  | StonePressurePlate
+  | IronDoor
+  | WoodenPressurePlate
+  | RedstoneOre
+  | GlowingRedstoneOre
+  | RedstoneTorchOff
+  | RedstoneTorchOn
+  | StoneButton
+  | Snow
+  | Ice
+  | SnowBlock
+  | Cactus
+  | Clay
+  | SugarCane
+  | Jukebox
+  | Fence
+  | Pumpkin
+  | Netherrack
+  | SoulSand
+  | Glowstone
+  | Portal
+  | JackOLantern
+  | Cake
+     deriving (Show, Read)
+
+instance JavaBinary BlockId where
+  getJ = do
+    tag <- getWord8
+    case tag of
+      0x00 -> return Air
+      0x01 -> return Stone
+      0x02 -> return Grass
+      0x03 -> return Dirt
+      0x04 -> return Cobblestone
+      0x05 -> return WoodenPlank
+      0x06 -> return Sapling
+      0x07 -> return Bedrock
+      0x08 -> return Water
+      0x09 -> return StationaryWater
+      0x0A -> return Lava
+      0x0B -> return StationaryLava
+      0x0C -> return Sand
+      0x0D -> return Gravel
+      0x0E -> return Goldore
+      0x0F -> return Ironore
+      0x10 -> return Coalore
+      0x11 -> return Wood
+      0x12 -> return Leaves
+      0x13 -> return Sponge
+      0x14 -> return Glass
+      0x15 -> return LapisLazuliOre
+      0x16 -> return LapisLazuliBlock
+      0x17 -> return Dispenser
+      0x18 -> return Sandstone
+      0x19 -> return NoteBlock
+      0x23 -> return Wool
+      0x25 -> return YellowFlower
+      0x26 -> return RedRose
+      0x27 -> return BrownMushroom
+      0x28 -> return RedMushroom
+      0x29 -> return GoldBlock
+      0x2A -> return IronBlock
+      0x2B -> return DoubleStoneSlab
+      0x2C -> return StoneSlab
+      0x2D -> return Brick
+      0x2E -> return TNT
+      0x2F -> return Bookshelf
+      0x30 -> return MossStone
+      0x31 -> return Obsidian
+      0x32 -> return Torch
+      0x33 -> return Fire
+      0x34 -> return MonsterSpawner
+      0x35 -> return WoodenStairs
+      0x36 -> return Chest
+      0x37 -> return RedstoneWire
+      0x38 -> return DiamondOre
+      0x39 -> return DiamondBlock
+      0x3A -> return Workbench
+      0x3B -> return Crops
+      0x3C -> return Soil
+      0x3D -> return Furnace
+      0x3E -> return BurningFurnace
+      0x3F -> return SignPost
+      0x40 -> return WoodenDoor
+      0x41 -> return Ladder
+      0x42 -> return MinecartTracks
+      0x43 -> return CobblestoneStairs
+      0x44 -> return WallSign
+      0x45 -> return Lever
+      0x46 -> return StonePressurePlate
+      0x47 -> return IronDoor
+      0x48 -> return WoodenPressurePlate
+      0x49 -> return RedstoneOre
+      0x4A -> return GlowingRedstoneOre
+      0x4B -> return RedstoneTorchOff
+      0x4C -> return RedstoneTorchOn
+      0x4D -> return StoneButton
+      0x4E -> return Snow
+      0x4F -> return Ice
+      0x50 -> return SnowBlock
+      0x51 -> return Cactus
+      0x52 -> return Clay
+      0x53 -> return SugarCane
+      0x54 -> return Jukebox
+      0x55 -> return Fence
+      0x56 -> return Pumpkin
+      0x57 -> return Netherrack
+      0x58 -> return SoulSand
+      0x59 -> return Glowstone
+      0x5A -> return Portal
+      0x5B -> return JackOLantern
+      0x5C -> return Cake
+      _ -> error ("block id " ++ show tag)
+
+  putJ Air                = putWord8 0x00
+  putJ Stone              = putWord8 0x01
+  putJ Grass              = putWord8 0x02
+  putJ Dirt               = putWord8 0x03
+  putJ Cobblestone        = putWord8 0x04
+  putJ WoodenPlank        = putWord8 0x05
+  putJ Sapling            = putWord8 0x06
+  putJ Bedrock            = putWord8 0x07
+  putJ Water              = putWord8 0x08
+  putJ StationaryWater    = putWord8 0x09
+  putJ Lava               = putWord8 0x0A
+  putJ StationaryLava     = putWord8 0x0B
+  putJ Sand               = putWord8 0x0C
+  putJ Gravel             = putWord8 0x0D
+  putJ Goldore            = putWord8 0x0E
+  putJ Ironore            = putWord8 0x0F
+  putJ Coalore            = putWord8 0x10
+  putJ Wood               = putWord8 0x11
+  putJ Leaves             = putWord8 0x12
+  putJ Sponge             = putWord8 0x13
+  putJ Glass              = putWord8 0x14
+  putJ LapisLazuliOre     = putWord8 0x15
+  putJ LapisLazuliBlock   = putWord8 0x16
+  putJ Dispenser          = putWord8 0x17
+  putJ Sandstone          = putWord8 0x18
+  putJ NoteBlock          = putWord8 0x19
+  putJ Wool               = putWord8 0x23
+  putJ YellowFlower       = putWord8 0x25
+  putJ RedRose            = putWord8 0x26
+  putJ BrownMushroom      = putWord8 0x27
+  putJ RedMushroom        = putWord8 0x28
+  putJ GoldBlock          = putWord8 0x29
+  putJ IronBlock          = putWord8 0x2A
+  putJ DoubleStoneSlab    = putWord8 0x2B
+  putJ StoneSlab          = putWord8 0x2C
+  putJ Brick              = putWord8 0x2D
+  putJ TNT                = putWord8 0x2E
+  putJ Bookshelf          = putWord8 0x2F
+  putJ MossStone          = putWord8 0x30
+  putJ Obsidian           = putWord8 0x31
+  putJ Torch              = putWord8 0x32
+  putJ Fire               = putWord8 0x33
+  putJ MonsterSpawner     = putWord8 0x34
+  putJ WoodenStairs       = putWord8 0x35
+  putJ Chest              = putWord8 0x36
+  putJ RedstoneWire       = putWord8 0x37
+  putJ DiamondOre         = putWord8 0x38
+  putJ DiamondBlock       = putWord8 0x39
+  putJ Workbench          = putWord8 0x3A
+  putJ Crops              = putWord8 0x3B
+  putJ Soil               = putWord8 0x3C
+  putJ Furnace            = putWord8 0x3D
+  putJ BurningFurnace     = putWord8 0x3E
+  putJ SignPost           = putWord8 0x3F
+  putJ WoodenDoor         = putWord8 0x40
+  putJ Ladder             = putWord8 0x41
+  putJ MinecartTracks     = putWord8 0x42
+  putJ CobblestoneStairs  = putWord8 0x43
+  putJ WallSign           = putWord8 0x44
+  putJ Lever              = putWord8 0x45
+  putJ StonePressurePlate = putWord8 0x46
+  putJ IronDoor           = putWord8 0x47
+  putJ WoodenPressurePlate= putWord8 0x48
+  putJ RedstoneOre        = putWord8 0x49
+  putJ GlowingRedstoneOre = putWord8 0x4A
+  putJ RedstoneTorchOff   = putWord8 0x4B
+  putJ RedstoneTorchOn    = putWord8 0x4C
+  putJ StoneButton        = putWord8 0x4D
+  putJ Snow               = putWord8 0x4E
+  putJ Ice                = putWord8 0x4F
+  putJ SnowBlock          = putWord8 0x50
+  putJ Cactus             = putWord8 0x51
+  putJ Clay               = putWord8 0x52
+  putJ SugarCane          = putWord8 0x53
+  putJ Jukebox            = putWord8 0x54
+  putJ Fence              = putWord8 0x55
+  putJ Pumpkin            = putWord8 0x56
+  putJ Netherrack         = putWord8 0x57
+  putJ SoulSand           = putWord8 0x58
+  putJ Glowstone          = putWord8 0x59
+  putJ Portal             = putWord8 0x5A
+  putJ JackOLantern       = putWord8 0x5B
+  putJ Cake               = putWord8 0x5C
+
+data Metadata = UnknownMetadata [Int8]
+ deriving (Show, Read)
+
+instance JavaBinary Metadata where
+  getJ = UnknownMetadata `fmap` aux
+    where aux = do tag <- getWord8
+                   if tag == 127 then return [] else liftM2 (:) getJ aux
+  putJ (UnknownMetadata []) = putWord8 127
+  putJ (UnknownMetadata (x:xs)) = putWord8 0 >> putJ x >> putJ (UnknownMetadata xs)
+
+data Action
+  = ActionCrouch
+  | ActionUncrouch
+  | ActionOther Int8
+  deriving (Show, Read)
+
+instance JavaBinary Action where
+  getJ = do
+    tag <- getJ
+    case tag of
+      1 -> return ActionCrouch
+      2 -> return ActionUncrouch
+      _ -> return $ ActionOther tag
+  putJ ActionCrouch      = putJ (1 :: Int8)
+  putJ ActionUncrouch    = putJ (2 :: Int8)
+  putJ (ActionOther tag) = putJ tag
+
+data Animate
+  = NoAnimate
+  | SwingArm
+  | DamageAnimation
+  | Crouch
+  | Uncrouch
+  | OtherAnimate Int8
+  deriving (Show, Read)
+
+instance JavaBinary Animate where
+  getJ = do
+    tag <- getJ
+    case tag of
+      0   -> return NoAnimate
+      1   -> return SwingArm
+      2   -> return DamageAnimation
+      104 -> return Crouch
+      105 -> return Uncrouch
+      _   -> return $ OtherAnimate tag
+  putJ NoAnimate          = putJ (0 :: Int8)
+  putJ SwingArm           = putJ (1 :: Int8)
+  putJ DamageAnimation    = putJ (2 :: Int8)
+  putJ Crouch             = putJ (104 :: Int8)
+  putJ Uncrouch           = putJ (105 :: Int8)
+  putJ (OtherAnimate tag) = putJ (tag :: Int8)
+
+data DiggingStatus
+  = StartedDigging
+  | Digging
+  | StoppedDigging
+  | BlockBroken
+  | DropItem
+  deriving (Show, Read)
+
+instance JavaBinary DiggingStatus where
+  getJ = do
+    tag <- getJ
+    case tag :: Int8 of
+      0 -> return StartedDigging
+      1 -> return Digging
+      2 -> return StoppedDigging
+      3 -> return BlockBroken
+      4 -> return DropItem
+  putJ StartedDigging = putJ (0 :: Int8)
+  putJ Digging        = putJ (1 :: Int8)
+  putJ StoppedDigging = putJ (2 :: Int8)
+  putJ BlockBroken    = putJ (3 :: Int8)
+  putJ DropItem       = putJ (4 :: Int8)
+
+data Face
+  = Y1 | Y2 | Z1 | Z2 | X1 | X2 | None
+  deriving (Show, Read)
+
+instance JavaBinary Face where
+  getJ = do
+    tag <- getJ
+    case tag :: Int8 of
+      -1 -> return None
+      0 -> return Y1
+      1 -> return Y2
+      2 -> return Z1
+      3 -> return Z2
+      4 -> return X1
+      5 -> return X2
+      _ -> error ("Bad face? " ++ show tag)
+  putJ None = putJ (-1 :: Int8)
+  putJ Y1   = putJ (0  :: Int8)
+  putJ Y2   = putJ (1  :: Int8)
+  putJ Z1   = putJ (2  :: Int8)
+  putJ Z2   = putJ (3  :: Int8)
+  putJ X1   = putJ (4  :: Int8)
+  putJ X2   = putJ (5  :: Int8)
+
+getLazyByteString32 = getLazyByteString . fromIntegral =<< getWord32be
+
+getMessage = do
+  tag <- getJ
+  case tag :: Int8 of
+    0x00 -> return KeepAliv
+    0x01 -> LoginRequest         <$> getJ <*> getString <*> getString <*> getJ
+                                 <*> getJ
+    0x02 -> Handshake            <$> getString
+    0x03 -> Chat                 <$> getString
+    0x04 -> TimeUpdate           <$> getJ
+    0x05 -> EntityEquipment      <$> getJ <*> getJ <*> getJ <*> getJ
+    0x06 -> SpawnPosition        <$> getJ <*> getJ <*> getJ
+    0x07 -> UseEntity            <$> getJ <*> getJ <*> getJ
+    0x08 -> UpdateHealth         <$> getJ
+    0x09 -> return Respawn
+    0x0a -> Player               <$> getJ
+    0x0b -> PlayerPosition       <$> getJ <*> getJ <*> getJ <*> getJ <*> getJ
+    0x0c -> PlayerLook           <$> getJ <*> getJ <*> getJ
+    0x0d -> PlayerPositionLook   <$> getJ <*> getJ <*> getJ <*> getJ <*> getJ
+                                 <*> getJ <*> getJ
+    0x0e -> PlayerDigging        <$> getJ <*> getJ <*> getJ <*> getJ <*> getJ
+    0x0f -> PlayerBlockPlacement <$> getJ <*> getJ <*> getJ <*> getJ
+                                 <*> getItemTriple
+    0x10 -> HoldingChange        <$> getJ
+    0x12 -> Animation            <$> getJ <*> getJ
+    0x13 -> EntityAction         <$> getJ <*> getJ
+    0x14 -> NamedEntitySpawn     <$> getJ <*> getString <*> getJ <*> getJ <*> getJ
+                                 <*> getJ <*> getJ <*> getJ
+    0x15 -> PickupSpawn          <$> getJ <*> getJ <*> getJ <*> getJ <*> getJ
+                                 <*> getJ <*> getJ <*> getJ <*> getJ <*> getJ
+    0x16 -> CollectItem          <$> getJ <*> getJ
+    0x17 -> AddObject            <$> getJ <*> getJ <*> getJ <*> getJ <*> getJ
+    0x18 -> MobSpawn             <$> getJ <*> getJ <*> getJ <*> getJ <*> getJ
+                                 <*> getJ <*> getJ <*> getJ
+    0x19 -> Painting             <$> getJ <*> getString <*> getJ <*> getJ <*> getJ
+                                 <*> getJ
+    0x1c -> EntityVelocity       <$> getJ <*> getJ <*> getJ <*> getJ
+    0x1d -> DestroyEntity        <$> getJ
+    0x1e -> Entity               <$> getJ
+    0x1f -> EntityRelativeMove   <$> getJ <*> getJ <*> getJ <*> getJ
+    0x20 -> EntityLook           <$> getJ <*> getJ <*> getJ
+    0x21 -> EntityLookMove       <$> getJ <*> getJ <*> getJ <*> getJ <*> getJ
+                                 <*> getJ
+    0x22 -> EntityTeleport       <$> getJ <*> getJ <*> getJ <*> getJ <*> getJ
+                                 <*> getJ
+    0x26 -> EntityStatus         <$> getJ <*> getJ
+    0x27 -> AttachEntity         <$> getJ <*> getJ
+    0x28 -> EntityMetadata       <$> getJ <*> getJ
+    0x32 -> Prechunk             <$> getJ <*> getJ <*> getJ
+    0x33 -> Mapchunk             <$> getJ <*> getJ <*> getJ <*> getJ <*> getJ
+                                 <*> getJ <*> getLazyByteString32
+    0x34 -> do f <- return MultiblockChange <*> getJ <*> getJ
+               sz <- getJ :: Get Int16
+               return f <*> replicateM (fromIntegral sz) getJ
+                        <*> replicateM (fromIntegral sz) getJ
+                        <*> replicateM (fromIntegral sz) getJ
+    0x35 -> BlockChange          <$> getJ <*> getJ <*> getJ <*> getJ <*> getJ
+    0x36 -> PlayNote             <$> getJ <*> getJ <*> getJ <*> getJ <*> getJ
+    0x3c -> Explosion            <$> getJ <*> getJ <*> getJ <*> getJ <*>
+               (getWord32be >>= \ len -> replicateM (fromIntegral len) getJ)
+    0x64 -> OpenWindow           <$> getJ <*> getJ <*> getString <*> getJ
+    0x65 -> CloseWindow          <$> getJ
+    0x66 -> WindowClick          <$> getJ <*> getJ <*> getJ <*> getJ
+                                 <*> getItemTriple
+    0x67 -> SetSlot              <$> getJ <*> getJ <*> getItemTriple
+    0x68 -> WindowItems          <$> getJ <*> items
+      where items = do count <- getWord16be
+                       replicateM (fromIntegral count) getItemTriple
+                         
+    0x69 -> UpdateProgressBar    <$> getJ <*> getJ <*> getJ
+    0x6a -> Transaction          <$> getJ <*> getJ <*> getJ
+    0x82 -> UpdateSign           <$> getJ <*> getJ <*> getJ <*> getString
+                                 <*> getString <*> getString <*> getString
+    0xff -> Disconnect           <$> getString
+    _ -> error $ "Unknown packet " ++ show tag
+
+getItemTriple :: Get (Maybe (Int16, Int8, Int16))
+getItemTriple = do
+  itemid <- getJ
+  if itemid == (-1) then return Nothing
+    else Just <$> ((itemid,,) <$> getJ <*> getJ)
+
+putItemTriple :: Maybe (Int16, Int8, Int16) -> Put
+putItemTriple Nothing = putWord16be (-1)
+putItemTriple (Just (itemid, count, uses)) =
+  putJ itemid *> putJ count *> putJ uses 
+
+putMessage KeepAliv = putJ (0x00 :: MessageTag)
+putMessage (LoginRequest ver usr pw x y) = do
+  putJ (0x01 :: MessageTag)
+  putJ ver
+  putString usr
+  putString pw
+  putJ x
+  putJ y
+putMessage (Handshake usr) = do
+  putJ (0x02 :: MessageTag)
+  putString usr
+putMessage (Chat msg) = do
+  putJ (0x03 :: MessageTag)
+  putString msg
+putMessage (TimeUpdate time) = do
+  putJ (0x04 :: MessageTag)
+  putJ time
+putMessage (EntityEquipment eid slot iid damage) = do
+  putJ (0x05 :: MessageTag)
+  putJ eid
+  putJ slot
+  putJ iid
+  putJ damage
+
+putMessage (SpawnPosition x y z) = do
+  putJ (0x06 :: MessageTag)
+  putJ x
+  putJ y
+  putJ z
+
+putMessage (UseEntity user target left) = do
+  putJ (0x07 :: MessageTag)
+  putJ user
+  putJ target
+  putJ left
+
+putMessage (UpdateHealth health) = do
+  putJ (0x08 :: MessageTag)
+  putJ health
+
+putMessage Respawn = putJ (0x09 :: MessageTag)
+
+putMessage (Player ground) = do
+  putJ (0x0a :: MessageTag)
+  putJ ground
+  
+putMessage (PlayerPosition x y stance z ground) = do
+  putJ (0x0b :: MessageTag)
+  putJ x
+  putJ y
+  putJ stance
+  putJ z
+  putJ ground
+
+putMessage (PlayerLook yaw pitch ground) = do
+  putJ (0x0c :: MessageTag)
+  putJ yaw
+  putJ pitch
+  putJ ground
+
+putMessage (PlayerPositionLook x stance y z yaw pitch ground) = do
+  putJ (0x0d :: MessageTag)
+  putJ x
+  putJ stance
+  putJ y
+  putJ z
+  putJ yaw
+  putJ pitch
+  putJ ground
+
+putMessage (PlayerDigging status x y z face) = do
+  putJ (0x0e :: MessageTag)
+  putJ status
+  putJ x
+  putJ y
+  putJ z
+  putJ face
+
+putMessage (PlayerBlockPlacement x y z face mbstuff) = do
+  putJ (0x0f :: MessageTag)
+  putJ x
+  putJ y
+  putJ z
+  putJ face
+  putItemTriple mbstuff
+
+putMessage (HoldingChange slot) = do
+  putJ (0x10 :: MessageTag)
+  putJ slot
+
+putMessage (Animation pid ani) = do
+  putJ (0x12 :: MessageTag)
+  putJ pid
+  putJ ani
+
+putMessage (EntityAction eid act) = do
+  putJ (0x13 :: MessageTag)
+  putJ eid
+  putJ act
+
+putMessage (NamedEntitySpawn eid name x y z rot pitch item) = do
+  putJ (0x14 :: MessageTag)
+  putJ eid
+  putString name
+  putJ x
+  putJ y
+  putJ z
+  putJ rot
+  putJ pitch
+  putJ item
+
+putMessage (PickupSpawn eid iid cnt dmg x y z rot pitch roll) = do
+  putJ (0x15 :: MessageTag)
+  putJ eid
+  putJ iid
+  putJ cnt
+  putJ dmg
+  putJ x
+  putJ y
+  putJ z
+  putJ rot
+  putJ pitch
+  putJ roll
+
+putMessage (CollectItem er or) = do
+  putJ (0x16 :: MessageTag)
+  putJ er
+  putJ or
+
+putMessage (AddObject eid ty x y z) = do
+  putJ (0x17 :: MessageTag)
+  putJ eid
+  putJ ty
+  putJ x
+  putJ y
+  putJ z
+
+putMessage (MobSpawn eid ty x y z yaw pitch meta) = do
+  putJ (0x18 :: MessageTag)
+  putJ eid
+  putJ ty
+  putJ x
+  putJ y
+  putJ z
+  putJ yaw
+  putJ pitch
+  putJ meta
+
+putMessage (Painting eid title x y z ty) = do
+  putJ (0x19 :: MessageTag)
+  putJ eid
+  putString title
+  putJ x
+  putJ y
+  putJ z
+  putJ ty
+
+putMessage (EntityVelocity eid x y z) = do
+  putJ (0x1c :: MessageTag)
+  putJ eid
+  putJ x
+  putJ y
+  putJ z
+
+putMessage (DestroyEntity eid) = do
+  putJ (0x1d :: MessageTag)
+  putJ eid
+
+putMessage (Entity eid) = do
+  putJ (0x1e :: MessageTag)
+  putJ eid
+
+putMessage (EntityRelativeMove eid x y z) = do
+  putJ (0x1f :: MessageTag)
+  putJ eid
+  putJ x
+  putJ y
+  putJ z
+
+
+putMessage (EntityLook eid yaw pitch) = do
+  putJ (0x20 :: MessageTag)
+  putJ eid
+  putJ yaw
+  putJ pitch
+
+putMessage (EntityLookMove eid x y z yaw pitch) = do
+  putJ (0x21 :: MessageTag)
+  putJ eid
+  putJ x
+  putJ y
+  putJ z
+  putJ yaw
+  putJ pitch
+
+putMessage (EntityTeleport eid x y z yaw pitch) = do
+  putJ (0x22 :: MessageTag)
+  putJ eid
+  putJ x
+  putJ y
+  putJ z
+  putJ yaw
+  putJ pitch
+
+putMessage (EntityStatus eid status) = do
+  putJ (0x26 :: MessageTag)
+  putJ eid
+  putJ status
+
+putMessage (AttachEntity eid vid) = do
+  putJ (0x27 :: MessageTag)
+  putJ eid
+  putJ vid
+
+putMessage (EntityMetadata eid meta) = do
+  putJ (0x28 :: MessageTag)
+  putJ eid
+  putJ meta
+
+putMessage (Prechunk x z mode) = do
+  putJ (0x32 :: MessageTag)
+  putJ x
+  putJ z
+  putJ mode
+
+putMessage (Mapchunk x y z szx szy szz bs) = do
+  putJ (0x33 :: MessageTag)
+  putJ x
+  putJ y
+  putJ z
+  putJ szx
+  putJ szy
+  putJ szz
+  putWord32be (fromIntegral (Data.ByteString.Lazy.length bs))
+  putLazyByteString bs
+
+
+putMessage (MultiblockChange x z coords tys metas) = do
+  putJ (0x34 :: MessageTag)
+  putJ x
+  putJ z
+  putWord16be (fromIntegral (length coords))
+  mapM_ putJ coords
+  mapM_ putJ tys
+  mapM_ putJ metas
+
+putMessage (BlockChange x y z ty meta) = do
+  putJ (0x35 :: MessageTag)
+  putJ x
+  putJ y
+  putJ z
+  putJ ty
+  putJ meta
+
+putMessage (PlayNote x y z ty pitch) = do
+  putJ (0x36 :: MessageTag)
+  putJ x
+  putJ y
+  putJ z
+  putJ ty
+  putJ pitch
+
+putMessage (Explosion x y z r xs) = do
+  putJ (0x3c :: MessageTag)
+  putJ x
+  putJ y
+  putJ z
+  putJ r
+  putWord32be (fromIntegral (length xs) `div` 3)
+  mapM_ putJ xs
+  
+putMessage (OpenWindow wid ty title slots) = do
+  putJ (0x64 :: MessageTag)
+  putJ wid
+  putJ ty
+  putString title
+  putJ slots
+  
+putMessage (CloseWindow wid) = do
+  putJ (0x65 :: MessageTag)
+  putJ wid
+
+putMessage (WindowClick win slot right act mbstuff) = do
+  putJ (0x66 :: MessageTag)
+  putJ win
+  putJ slot
+  putJ right
+  putJ act
+  putItemTriple mbstuff
+
+putMessage (SetSlot win slot mbstuff) = do
+  putJ (0x67 :: MessageTag)
+  putJ win
+  putJ slot
+  putItemTriple mbstuff
+
+putMessage (WindowItems win xs) = do
+  putJ (0x68 :: MessageTag)
+  putJ win
+  putWord16be (fromIntegral (length xs))
+  mapM_ putItemTriple xs  
+
+putMessage (UpdateProgressBar win bar val) = do
+  putJ (0x69 :: MessageTag)
+  putJ win
+  putJ bar
+  putJ val
+
+putMessage (Transaction win act accept) = do
+  putJ (0x6a :: MessageTag)
+  putJ win
+  putJ act
+  putJ accept
+
+putMessage (UpdateSign x y z tx1 tx2 tx3 tx4) = do
+  putJ (0x82 :: MessageTag)
+  putJ x
+  putJ y
+  putJ z
+  putString tx1
+  putString tx2
+  putString tx3
+  putString tx4
+
+putMessage (Disconnect reason) = do
+  putJ (0xff :: MessageTag)
+  putString reason
+
+getString :: Get String
+getString = do
+  len <- getWord16be
+  Data.ByteString.Char8.unpack `fmap` getByteString (fromIntegral len)
+
+putString :: String -> Put
+putString xs = do
+  putJ (fromIntegral (length xs) :: Int16)
+  putByteString (Data.ByteString.Char8.pack xs)
+
+splitMessage :: Data.ByteString.Lazy.ByteString ->
+                (Message, Data.ByteString.Lazy.ByteString)
+splitMessage = runGet $ liftM2 (,) getMessage getRemainingLazyByteString
+
+main = do
+  [host, port] <- getArgs
+
+  l <- socket AF_INET Stream defaultProtocol
+  setSocketOption l ReuseAddr 1
+  [ai] <- getAddrInfo (Just defaultHints { addrFamily = AF_INET
+                                         , addrSocketType = Stream })
+                      (Just "localhost") (Just "25564")
+  let sa = addrAddress ai
+  bindSocket l sa
+  listen l 1
+
+  (c, _csa) <- accept l
+
+  s <- socket AF_INET Stream defaultProtocol
+  setSocketOption s ReuseAddr 1
+  [ai] <- getAddrInfo (Just defaultHints { addrFamily = AF_INET
+                                         , addrSocketType = Stream })
+                       (Just host) (Just port)
+  let sa = addrAddress ai
+  print sa
+  connect s sa
+
+  proxy c s
+
+proxy c s = do
+  var <- newEmptyMVar
+  emap <- newIORef Map.empty
+  follow <- newIORef Nothing
+  chan <- newChan
+  schan <- newChan
+  forkIO $ do sbs <- getContents s
+              proxy1 "inbound" sbs chan (inboundLogic follow emap)
+            `finally` putMVar var "inbound"
+  forkIO $ forever (sendAll c =<< readChan chan ) `finally` putMVar var "inbound network" 
+  forkIO $ forever (sendAll s =<< readChan schan ) `finally` putMVar var "outbound network" 
+  forkIO $ do cbs <- getContents c
+              proxy1 "outbound" cbs schan (outboundLogic follow emap chan)
+            `finally` putMVar var "outbound"
+  who <- takeMVar var
+  putStr who
+  putStrLn " died"
+  exitFailure
+
+inboundLogic follow emap msg = do
+  case msg of
+    Entity {} -> return ()
+    EntityLook {} -> return ()
+    EntityVelocity {} -> return ()
+    EntityRelativeMove {} -> return ()
+    EntityLookMove {} -> return ()
+    DestroyEntity {} -> return ()
+    KeepAliv -> return ()
+    Prechunk{} -> return ()
+    TimeUpdate {} -> return ()
+    Mapchunk {} -> return ()
+    _ -> putStrLn $ "inbound: " ++ show msg
+  changedEid <- case msg of
+    NamedEntitySpawn eid name x y z _ _ _ -> do
+      atomicModifyIORef_ emap $ Map.insert eid (Left name,x :: Int32 ,y :: Int32,z :: Int32)
+      return (Just eid)
+    MobSpawn eid ty x y z _ _ _ -> do
+      atomicModifyIORef_ emap $ Map.insert eid (Right ty, x :: Int32 ,y :: Int32,z :: Int32)
+      return (Just eid)
+    EntityTeleport eid x y z _ _ -> do
+      atomicModifyIORef_ emap
+         $ Map.update (\ (ty,_,_,_) -> Just (ty, x, y, z)) eid
+      return (Just eid)
+    EntityRelativeMove eid dX dY dZ -> do
+      atomicModifyIORef_ emap
+         $ Map.update (\ (ty,x,y,z) -> Just (ty, x + fromIntegral dX,
+                                                 y + fromIntegral dY,
+                                                 z + fromIntegral dZ)) eid
+      return (Just eid)
+    EntityLookMove eid dX dY dZ _ _ -> do
+      atomicModifyIORef_ emap
+         $ Map.update (\ (ty,x,y,z) -> Just (ty, x + fromIntegral dX,
+                                                 y + fromIntegral dY,
+                                                 z + fromIntegral dZ)) eid
+      return (Just eid)
+    DestroyEntity eid -> do
+      atomicModifyIORef_ emap $ Map.delete eid
+      return Nothing
+    _ -> return Nothing
+  
+  interested <- readIORef follow
+  case interested of
+    Just ieid | interested == changedEid -> do
+     e <- readIORef emap
+     case Map.lookup ieid e of
+       Just (ty, x, y, z) -> return [SpawnPosition (x `div` 32) (y `div` 32) (z `div` 32),msg]
+       _ -> return [msg]
+    _ -> return [msg]
+     
+atomicModifyIORef_ v f = atomicModifyIORef v $ \ x -> (f x, ())
+
+outboundLogic follow emap inchan msg = do
+  case msg of
+    PlayerPosition {} -> return [msg]
+    PlayerPositionLook {} -> return [msg]
+    PlayerLook {} -> return [msg]
+    Player {} -> return [msg]
+    KeepAliv -> return [msg]
+    Chat ('F':xs) -> do case reads xs of
+                          [(eid,_)] -> writeIORef follow eid
+                          _ -> return ()
+                        return []
+    Chat "E" -> do
+       e <- readIORef emap
+       print $ Map.map (\ (ty,x,y,z) -> (ty, x`div`32, y`div`32,z`div`32)) e
+       return []
+                
+    _ -> do putStrLn $ "outbound: " ++ show msg
+            return [msg]
+
+proxy1 label bs sock f = do
+  let (msg, bs') = splitMessage bs
+  mapM_ (writeChan sock . runPut . putMessage) =<< f msg
+  proxy1 label bs' sock f
