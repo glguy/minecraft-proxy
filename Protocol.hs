@@ -45,7 +45,7 @@ data Message
   | TimeUpdate   Int64 -- ^ The world time in minutes
 
   | EntityEquipment EntityId
-                    Int16 -- ^ Slot
+                    SlotId
                     Int16 -- ^ Item ID
                     Int16 -- ^ Damage?
 
@@ -202,9 +202,7 @@ data Message
 
   | MultiblockChange Int32 -- ^ Chunk X
                      Int32 -- ^ Chunk Z
-                     [Int16] -- ^ Coordinates
-                     [BlockId] -- ^ Block types
-                     [Int8] -- ^ Metadata
+                     [(Int16, BlockId, Int8)] -- ^ Coordinate, Block type, Meta
 
   | BlockChange Int32 -- ^ Block X
                 Int8  -- ^ Block Y
@@ -814,11 +812,12 @@ getMessage = do
     0x32 -> Prechunk             <$> getJ <*> getJ <*> getJ
     0x33 -> Mapchunk             <$> getJ <*> getJ <*> getJ <*> getJ <*> getJ
                                  <*> getJ <*> getLazyByteString32
-    0x34 -> do f <- return MultiblockChange <*> getJ <*> getJ
-               sz <- getJ :: Get Int16
-               return f <*> replicateM (fromIntegral sz) getJ
-                        <*> replicateM (fromIntegral sz) getJ
-                        <*> replicateM (fromIntegral sz) getJ
+    0x34 -> MultiblockChange <$> getJ <*> getJ <*> changes
+      where changes = do
+              sz <- getJ :: Get Int16
+              zip3 <$> replicateM (fromIntegral sz) getJ
+                   <*> replicateM (fromIntegral sz) getJ
+                   <*> replicateM (fromIntegral sz) getJ
     0x35 -> BlockChange          <$> getJ <*> getJ <*> getJ <*> getJ <*> getJ
     0x36 -> PlayNote             <$> getJ <*> getJ <*> getJ <*> getJ <*> getJ
     0x3c -> Explosion            <$> getJ <*> getJ <*> getJ <*> getJ <*>
@@ -1077,11 +1076,12 @@ putMessage (Mapchunk x y z szx szy szz bs) = do
   putLazyByteString bs
 
 
-putMessage (MultiblockChange x z coords tys metas) = do
+putMessage (MultiblockChange x z xs) = do
   putJ (0x34 :: MessageTag)
   putJ x
   putJ z
-  putWord16be (fromIntegral (length coords))
+  putWord16be (fromIntegral (length xs))
+  let (coords, tys, metas) = unzip3 xs
   traverse_ putJ coords
   traverse_ putJ tys
   traverse_ putJ metas
