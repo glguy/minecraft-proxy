@@ -1026,7 +1026,7 @@ putMessage (Explosion x y z r xs) = do
   putJ y
   putJ z
   putJ r
-  putWord32be (fromIntegral (length xs) `div` 3)
+  putWord32be (fromIntegral (length xs))
   traverse_ putJ xs
   
 putMessage (OpenWindow wid ty title slots) = do
