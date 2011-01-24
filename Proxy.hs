@@ -9,6 +9,7 @@ import Control.Monad
 import Data.Binary.Put (runPut)
 import qualified Data.ByteString.Lazy as L
 import Data.ByteString.Lazy (ByteString)
+import Data.Bits
 import Data.Foldable
 import Data.IORef
 import Data.Int
@@ -21,7 +22,7 @@ import System.Exit
 import qualified Data.Map as Map
 import qualified Network
 
-type EntityMap = Map Int32 (Either String MobId, Int32, Int32, Int32)
+type EntityMap = Map EntityId (Either String MobId, Int32, Int32, Int32)
 
 main :: IO ()
 main = do
@@ -53,12 +54,13 @@ proxy :: Socket -> Socket -> IO a
 proxy c s = do
   var <- newEmptyMVar
   emap <- newIORef Map.empty
+  glassvar <- newIORef False
   follow <- newIORef Nothing
   chan <- newChan
   schan <- newChan
   _ <- forkIO $ do
           sbs <- getContents s
-          proxy1 sbs chan (inboundLogic follow emap)
+          proxy1 sbs chan (inboundLogic follow emap glassvar)
          `finally` putMVar var "inbound"
   _ <- forkIO $ forever (sendAll c =<< readChan chan )
                   `finally` putMVar var "inbound network" 
@@ -66,7 +68,7 @@ proxy c s = do
                  `finally` putMVar var "outbound network" 
   _ <- forkIO $ do
           cbs <- getContents c
-          proxy1 cbs schan (outboundLogic follow emap)
+          proxy1 cbs schan (outboundLogic follow emap glassvar)
          `finally` putMVar var "outbound"
   who <- takeMVar var
   putStr who
@@ -75,7 +77,7 @@ proxy c s = do
 
 -- | Update the state of the entity map and return the Entity ID
 -- of the entity that changed, if any.
-updateEntityMap :: IORef EntityMap -> Message -> IO (Maybe Int32)
+updateEntityMap :: IORef EntityMap -> Message -> IO (Maybe EntityId)
 updateEntityMap emap (NamedEntitySpawn eid name x y z _ _ _) = do
   atomicModifyIORef_ emap $ Map.insert eid (Left name, x, y, z)
   return (Just eid)
@@ -108,12 +110,36 @@ updateEntityMap emap (DestroyEntity eid) = do
 
 updateEntityMap _ _ = return Nothing
 
+processChunk sx sy sz bs
+  | L.length blight /= L.length slight = error "bad"
+  | otherwise = compress bigbs'
+  where
+  bigbs = decompress bs
+  block_count = (fromIntegral sx + 1)
+              * (fromIntegral sy + 1)
+              * (fromIntegral sz + 1)
 
-inboundLogic :: IORef (Maybe Int32) ->
+  (blocks,bigbs1) = L.splitAt block_count bigbs
+  (metas ,bigbs2) = L.splitAt (block_count `div` 2) bigbs1
+  (blight ,slight) = L.splitAt (block_count `div` 2) bigbs2
+  blocks' = L.map (\x -> if x == 0x1 then 0x14 else if x == 0x38 then 0x59 else x) blocks
+  diamonds = L.findIndices (\x -> x == 0x1 || x == 0x38) blocks
+  bigbs' = L.concat [blocks', bigbs1] -- metas, blight, slight]
+
+updateLights changeset = snd . L.mapAccumL aux (0, changeset)
+  where
+  aux (i,[]) b = ((i+1,[]),b)
+  aux (i,x:xs) b
+    | 2*i == x = aux (i,xs) 0xff
+    | 2*i+1 == x = ((i+1,xs), 0xff)
+    | otherwise = ((i+1,xs), b)
+
+inboundLogic :: IORef (Maybe EntityId) ->
                 IORef EntityMap ->
+                IORef Bool ->
                 Message ->
                 IO [Message]
-inboundLogic follow emap msg = do
+inboundLogic follow emap glassvar msg = do
   case msg of
     Entity {} -> return ()
     EntityLook {} -> return ()
@@ -124,10 +150,15 @@ inboundLogic follow emap msg = do
     KeepAliv -> return ()
     Prechunk{} -> return ()
     TimeUpdate {} -> return ()
-    Mapchunk {} -> return ()
+    Mapchunk x y z sx sy sz bs -> return ()
     _ -> putStrLn $ "inbound: " ++ show msg
 
   changedEid <- updateEntityMap emap msg
+
+  glass <- readIORef glassvar
+  let msg' = case msg of
+               Mapchunk x y z sx sy sz bs | glass -> Mapchunk x y z sx sy sz $ processChunk sx sy sz bs
+               _ -> msg
 
   interested <- readIORef follow
   case interested of
@@ -135,15 +166,16 @@ inboundLogic follow emap msg = do
      e <- readIORef emap
      case Map.lookup ieid e of
        Just (_ty, x, y, z) ->
-         return [SpawnPosition (x `div` 32) (y `div` 32) (z `div` 32),msg]
-       _ -> return [msg]
-    _ -> return [msg]
+         return [SpawnPosition (x `div` 32) (y `div` 32) (z `div` 32),msg']
+       _ -> return [msg']
+    _ -> return [msg']
      
-outboundLogic :: IORef (Maybe Int32) ->
+outboundLogic :: IORef (Maybe EntityId) ->
                  IORef EntityMap ->
+                 IORef Bool ->
                  Message ->
                  IO [Message]
-outboundLogic follow emap msg = do
+outboundLogic follow emap glassvar msg = do
   case msg of
     PlayerPosition {} -> return [msg]
     PlayerPositionLook {} -> return [msg]
@@ -157,6 +189,9 @@ outboundLogic follow emap msg = do
     Chat "E" -> do
        e <- readIORef emap
        print $ Map.map (\ (ty,x,y,z) -> (ty, x`div`32, y`div`32,z`div`32)) e
+       return []
+    Chat "G" -> do
+       atomicModifyIORef_ glassvar not
        return []
                 
     _ -> do putStrLn $ "outbound: " ++ show msg

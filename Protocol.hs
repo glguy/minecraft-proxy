@@ -1,4 +1,5 @@
 {-# LANGUAGE TupleSections #-}
+{-# LANGUAGE GeneralizedNewtypeDeriving #-}
 module Protocol where
 
 import Control.Applicative
@@ -14,6 +15,18 @@ import qualified Data.ByteString.Lazy
 import JavaBinary
 
 type MessageTag = Int8
+
+newtype EntityId = EID Int32
+  deriving (Eq, Ord, Show,Read,JavaBinary)
+
+newtype SlotId = SID Int16
+  deriving (Eq, Ord, Show,Read,JavaBinary)
+
+newtype WindowId = WID Int8
+  deriving (Eq, Ord, Show,Read,JavaBinary)
+
+newtype TransactionId = TID Int16
+  deriving (Eq, Ord, Show,Read,JavaBinary)
 
 data Message
 
@@ -31,7 +44,7 @@ data Message
 
   | TimeUpdate   Int64 -- ^ The world time in minutes
 
-  | EntityEquipment Int32 -- ^ Entity ID
+  | EntityEquipment EntityId
                     Int16 -- ^ Slot
                     Int16 -- ^ Item ID
                     Int16 -- ^ Damage?
@@ -40,8 +53,8 @@ data Message
                   Int32 -- ^ Y
                   Int32 -- ^ Z
 
-  | UseEntity Int32 -- ^ User
-              Int32 -- ^ Target
+  | UseEntity EntityId -- ^ User
+              EntityId -- ^ Target
               Bool -- ^ Left-click?
 
   | UpdateHealth Int16 -- ^ Health: 0--20
@@ -84,13 +97,13 @@ data Message
 
   | HoldingChange Int16 -- ^ Slot
 
-  | Animation Int32 -- ^ Player ID
+  | Animation EntityId -- ^ Player ID
               Animate
 
-  | EntityAction Int32 -- ^ Player ID
+  | EntityAction EntityId -- ^ Player ID
                  Action
 
-  | NamedEntitySpawn Int32 -- ^ Player ID
+  | NamedEntitySpawn EntityId -- ^ Player ID
                      String -- ^ Player Name
                      Int32 -- ^ X
                      Int32 -- ^ Y
@@ -99,7 +112,7 @@ data Message
                      Int8 -- ^ Pitch
                      Int16 -- ^ Current Item
 
-  | PickupSpawn Int32 -- ^ Entity ID
+  | PickupSpawn EntityId -- ^ Player ID
                 Int16 -- ^ Item ID
                 Int8  -- ^ Count
                 Int16  -- ^ Damage?
@@ -110,16 +123,16 @@ data Message
                 Int8 -- ^ Pitch
                 Int8 -- ^ Roll
 
-  | CollectItem Int32 -- ^ Collected
-                Int32 -- ^ Collector
+  | CollectItem EntityId -- ^ Collected
+                EntityId -- ^ Collector
 
-  | AddObject Int32 -- ^ Entity ID
+  | AddObject EntityId
               Int8  -- ^ Type ID
               Int32 -- ^ X
               Int32 -- ^ Y
               Int32 -- ^ Z
 
-  | MobSpawn Int32 -- ^ Entity ID
+  | MobSpawn EntityId
              MobId -- ^ Mob ID
              Int32 -- ^ X
              Int32 -- ^ Y
@@ -128,73 +141,116 @@ data Message
              Int8  -- ^ Pitch
              Metadata
 
-  | Painting Int32 -- ^ Entity ID
+  | Painting EntityId
              String -- ^ Name of painting
              Int32 -- ^ X
              Int32 -- ^ Y
              Int32 -- ^ Z
              Int32 -- ^ Graphic ID
 
-  | EntityVelocity Int32 -- ^ Entity ID
+  | EntityVelocity EntityId
                    Int16 -- ^ X Velocity
                    Int16 -- ^ Y Velocity
                    Int16 -- ^ Z Velocity
 
-  | DestroyEntity Int32 -- ^ Entity ID
+  | DestroyEntity EntityId
 
-  | Entity Int32 -- ^ Entity ID
+  | Entity EntityId
 
-  | EntityRelativeMove Int32 -- ^ Entity ID
+  | EntityRelativeMove EntityId
                        Int8 -- ^ Change in X
                        Int8 -- ^ Change in Y
                        Int8 -- ^ Change in Z
 
-  | EntityLook Int32 -- ^ Entity ID
+  | EntityLook EntityId
                Int8 -- ^ Yaw
                Int8 -- ^ Pitch
-  | EntityLookMove Int32 -- ^ Entity ID
+
+  | EntityLookMove EntityId
                    Int8  -- ^ dX
                    Int8  -- ^ dY
                    Int8  -- ^ dZ
                    Int8  -- ^ Yaw
                    Int8  -- ^ Pitch
-  | EntityTeleport Int32 -- ^ Entity ID
+
+  | EntityTeleport EntityId
                    Int32 -- ^ X
                    Int32 -- ^ Y
                    Int32 -- ^ Z
                    Int8  -- ^ Yaw
                    Int8  -- ^ Pitch
-  | EntityStatus Int32 -- ^ Entity ID
+
+  | EntityStatus EntityId
                  Int8 -- ^ Status
-  | AttachEntity Int32 -- ^ Entity ID
-                 Int32 -- ^ Vehicle ID
-  | EntityMetadata Int32 Metadata
+
+  | AttachEntity EntityId -- ^ Entity ID
+                 EntityId -- ^ Vehicle ID
+
+  | EntityMetadata EntityId Metadata
+
   | Prechunk Int32 -- ^ X
              Int32 -- ^ Z
              Bool  -- ^ Load on True, Unload on False
-  | Mapchunk Int32 Int16 Int32 Int8 Int8 Int8 Data.ByteString.Lazy.ByteString
-  | MultiblockChange Int32 Int32 [Int16] [BlockId] [Int8]
-  | BlockChange Int32 Int8 Int32 BlockId Int8
-  | PlayNote Int32 Int16 Int32 Int8 Int8
-  | Explosion Double Double Double Float [(Int8,Int8,Int8)]
-  | OpenWindow Int8 -- ^ Window ID
+
+  | Mapchunk Int32 -- ^ X
+             Int16 -- ^ Y
+             Int32 -- ^ Z
+             Int8  -- ^ X length
+             Int8  -- ^ Y length
+             Int8  -- ^ Z length
+             Data.ByteString.Lazy.ByteString -- ^ ZLib Deflate compressed data
+
+  | MultiblockChange Int32 -- ^ Chunk X
+                     Int32 -- ^ Chunk Z
+                     [Int16] -- ^ Coordinates
+                     [BlockId] -- ^ Block types
+                     [Int8] -- ^ Metadata
+
+  | BlockChange Int32 -- ^ Block X
+                Int8  -- ^ Block Y
+                Int32 -- ^ Block Z
+                BlockId
+                Int8  -- ^ Block metadata
+
+  | PlayNote Int32 -- ^ Block X
+             Int16 -- ^ Block Y
+             Int32 -- ^ Block Z
+             InstrumentType
+             Int8  -- ^ Pitch
+
+  | Explosion Double -- ^ X
+              Double -- ^ Y
+              Double -- ^ Z
+              Float  -- ^ Radius?
+              [(Int8,Int8,Int8)] -- ^ Relative X,Y,Z of affected blocks
+
+  | OpenWindow WindowId
                InventoryType
                String -- ^ Title
                Int8 -- ^ Number of slots
-  | CloseWindow Int8 -- ^ Window ID
-  | WindowClick Int8 Int16 Int8 Int16 (Maybe (Int16, Int8, Int16))
-  | SetSlot Int8 -- ^ Window ID
-            Int16 -- ^ Slot ID
+
+  | CloseWindow WindowId
+
+  | WindowClick WindowId
+                SlotId
+                Bool -- ^ Right-click
+                TransactionId
+                (Maybe (Int16, Int8, Int16)) -- ^ Optional Item, Count, Uses
+
+  | SetSlot WindowId
+            SlotId
             (Maybe (Int16, Int8, Int16)) -- ^ Item, Count and Use
 
-  | WindowItems Int8 -- ^ Window ID
+  | WindowItems WindowId
                 [Maybe (Int16, Int8, Int16)] -- ^ List of slots (Item ID, Count, Uses)
-  | UpdateProgressBar Int8 -- ^ Window ID
+  | UpdateProgressBar WindowId
                       Int16 -- ^ Progress bar ID
                       Int16 -- ^ Value
-  | Transaction Int8 -- ^ Window ID
-                Int16 -- ^ Action Number
+
+  | Transaction WindowId
+                TransactionId
                 Bool -- ^ Success
+
   | UpdateSign Int32 -- ^ X
                Int16 -- ^ Y
                Int32 -- ^ Z
@@ -210,6 +266,32 @@ data Message
 instance JavaBinary Message where
   getJ = getMessage
   putJ = putMessage
+
+data InstrumentType
+  = DoubleBass
+  | SnareDrum
+  | Sticks
+  | BassDrum
+  | Harp
+  | OtherInstrument Int8
+  deriving (Show, Read)
+
+instance JavaBinary InstrumentType where
+  getJ = fmap (\tag -> case tag of
+      1 -> DoubleBass
+      2 -> SnareDrum
+      3 -> Sticks
+      4 -> BassDrum
+      5 -> Harp
+      _ -> OtherInstrument tag
+    ) getJ
+
+  putJ DoubleBass            = putJ (1 :: Int8)
+  putJ SnareDrum             = putJ (2 :: Int8)
+  putJ Sticks                = putJ (3 :: Int8)
+  putJ BassDrum              = putJ (4 :: Int8)
+  putJ Harp                  = putJ (5 :: Int8)
+  putJ (OtherInstrument tag) = putJ tag
 
 data InventoryType
   = BasicInventory
