@@ -5,7 +5,9 @@ import qualified Data.ByteString as B
 import qualified Data.ByteString.Lazy as L
 import qualified Data.ByteString.Internal as I
 import Data.Map (Map)
+import Data.Maybe (fromMaybe)
 import Data.Foldable (for_)
+import Data.List (foldl')
 import qualified Data.Map as Map
 import Data.Int
 import Data.Bits
@@ -18,7 +20,7 @@ import JavaBinary
 
 type EntityMap = Map EntityId (Either String MobId, Int32, Int32, Int32)
 
-type BlockMap  = Map (Int32, Int32, Int32) (ByteString, ByteString)
+type BlockMap  = Map (Int32, Int32, Int32) (Map (Int8, Int8, Int8) (BlockId, Int8))
 
 data GameState = GS
   { entityMap :: !EntityMap 
@@ -88,40 +90,29 @@ updateGameState (TimeUpdate t) gs
 updateGameState (Mapchunk x y z sx sy sz bs) gs
   = (Nothing, updateBlockMap (setChunk x y z sx sy sz bs) gs)
 
+-}
 updateGameState (MultiblockChange x z changes) gs
   = (Nothing, updateBlockMap (setBlocks x z changes) gs)
 
 updateGameState (BlockChange x y z blockid meta) gs
   = (Nothing, updateBlockMap (setBlock x y z blockid meta) gs)
--}
 
 updateGameState _ gs = (Nothing, gs)
 
 
+decomposeCoords :: Int32 -> Int32 -> Int32 -> (Int32, Int32, Int32, Int8, Int8, Int8)
 decomposeCoords x y z = (x `shiftR` 4
                         ,y `shiftR` 7
                         ,z `shiftR` 4
-                        ,x .&. 0xf
-                        ,y .&. 0x7f
-                        ,z .&. 0xf
+                        ,fromIntegral $ x .&. 0xf
+                        ,fromIntegral $ y .&. 0x7f
+                        ,fromIntegral $ z .&. 0xf
                         )
-{-
-setBlocks x z changes = Map.update (Just . aux) (x,0,z)
+setBlocks x z changes = Map.alter (\ x -> Just (foldl' aux (fromMaybe Map.empty x) changes)) (x,0,z)
   where
-  splitCoord c = (c `shiftR` 12, c .&. 0x7f, (c `shiftR` 8) .&. 0xf)
-  aux (bs, ms) = (alterByteString bs $ \ p ->
-                  for_ changes $ \ (coord, ty, meta) ->
-                  let (x,y,z) = splitCoord coord in
-                  pokeElemOff p (fromIntegral $ (x * 16 + z) * 16 + y) (L.head (encode ty))
-                 ,alterByteString ms $ \ p ->
-                  for_ changes $ \ (coord, ty, meta) ->
-                  let (x,y,z) = splitCoord coord in
-                  pokeElemOff p (fromIntegral $ (x * 16 + z) * 16 + y) (fromIntegral meta))
+  splitCoord c = (fromIntegral $ c `shiftR` 12, fromIntegral $ c .&. 0x7f, fromIntegral $ (c `shiftR` 8) .&. 0xf)
+  aux m (coord, ty, meta) = Map.insert (splitCoord coord) (ty, meta) m
 
-setBlock x y z blockid meta = Map.update (Just . aux) (cx,cy,cz)
+setBlock x y z blockid meta = Map.alter (Just . Map.insert (bx,by,bz) (blockid, meta) . fromMaybe Map.empty) (cx,cy,cz)
   where
   (cx,cy,cz,bx,by,bz) = decomposeCoords x (fromIntegral y) z
-  blockbyte = L.head $ encode blockid
-  aux (a,b) = (updateByteString (bx * 16 * 16 + bz * 16 + by) blockbyte a
-              ,updateByteString (bx * 16 * 16 + bz * 16 + by) (fromIntegral meta) b)
--}
