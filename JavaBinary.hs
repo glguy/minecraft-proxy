@@ -48,8 +48,8 @@ instance JavaBinary Bool where
 instance JavaBinary String where
   getJ = do
     len <- getWord16be
-    bs  <- getLazyByteString (fromIntegral len)
-    return (toString bs)
+    bs  <- getByteString $ fromIntegral len
+    return $ toString $ Data.ByteString.Lazy.fromChunks [bs]
   putJ xs = do
     let bs = fromString xs
     putWord16be (fromIntegral (Data.ByteString.Lazy.length bs))
