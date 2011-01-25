@@ -62,7 +62,8 @@ proxy c s = do
   schan <- newChan
   _ <- forkIO $ do
           sbs <- getContents s
-          proxy1 sbs chan (inboundLogic follow emap glassvar)
+          traverse_ (proxy1 chan (inboundLogic follow emap glassvar))
+                    (toMessages sbs)
          `finally` putMVar var "inbound"
   _ <- forkIO $ forever (sendAll c =<< readChan chan )
                   `finally` putMVar var "inbound network" 
@@ -70,7 +71,8 @@ proxy c s = do
                  `finally` putMVar var "outbound network" 
   _ <- forkIO $ do
           cbs <- getContents c
-          proxy1 cbs schan (outboundLogic chan follow emap glassvar)
+          traverse_ (proxy1 schan (outboundLogic chan follow emap glassvar))
+                    (toMessages cbs)
          `finally` putMVar var "outbound"
   who <- takeMVar var
   putStr who
@@ -113,7 +115,6 @@ inboundLogic follow emap glassvar msg = do
     Mapchunk x y z sx sy sz bs -> return ()
     _ -> putStrLn $ "inbound: " ++ show msg
 
-{-
   changedEid <- atomicModifyIORef emap $ \ gs ->
                        let (change, gs') = updateGameState msg gs
                        in (gs', gs' `seq` change)
@@ -134,8 +135,6 @@ inboundLogic follow emap glassvar msg = do
          return [SpawnPosition (x `div` 32) (y `div` 32) (z `div` 32),msg']
        _ -> return [msg']
     _ -> return [msg']
-  -}
-  return [msg]
 
 processCommand cchan follow emap glassvar "glass on"
   =  writeIORef glassvar True
@@ -186,14 +185,11 @@ outboundLogic cchan follow emap glassvar msg = do
 
 -- | Read a message from the ByteString, process it with the given
 -- continuation, and serialize all resulting mesages to the given channel.
-proxy1 :: ByteString -> Chan ByteString -> (Message -> IO [Message])
-       -> IO a
-proxy1 bs sock f = do
-  let (msg, bs') = splitMessage bs
-  print msg
+proxy1 :: Chan ByteString -> (Message -> IO [Message]) -> Message
+       -> IO ()
+proxy1 sock f msg = do
   msgs <- f msg
   unless (null msgs) $ writeChan sock $ runPut $ traverse_ putMessage msgs
-  proxy1 bs' sock f
 
 atomicModifyIORef_ :: IORef a -> (a -> a) -> IO ()
 atomicModifyIORef_ v f = atomicModifyIORef v $ \ x -> (f x, ())

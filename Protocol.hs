@@ -1168,7 +1168,8 @@ putMessage (Disconnect reason) = do
   putJ (0xff :: MessageTag)
   putJ reason
 
-splitMessage :: Data.ByteString.Lazy.ByteString ->
-                (Message, Data.ByteString.Lazy.ByteString)
-splitMessage = runGet $ liftM2 (,) getJ getRemainingLazyByteString
+toMessages :: Data.ByteString.Lazy.ByteString -> [Message]
+toMessages bs = msg : toMessages rest
+  where
+  (msg, rest) = runGet (liftA2 (,) getJ getRemainingLazyByteString) bs
 
