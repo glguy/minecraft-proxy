@@ -30,234 +30,234 @@ newtype TransactionId = TID Int16
 
 data Message
 
-  = KeepAliv -- ^ Keep alives are sent every 1200 ticks
+  = KeepAliv --  Keep alives are sent every 1200 ticks
 
-  | LoginRequest Int32  -- ^ Protocol Version
-                 String -- ^ Username
-                 String -- ^ Password
-                 Int64  -- ^ Map Seed
-                 Int8   -- ^ Dimension
+  | LoginRequest Int32  --  Protocol Version
+                 String --  Username
+                 String --  Password
+                 Int64  --  Map Seed
+                 Int8   --  Dimension
 
-  | Handshake    String -- ^ Username
+  | Handshake    String --  Username
 
-  | Chat         String -- ^ Message
+  | Chat         String --  Message
 
-  | TimeUpdate   Int64 -- ^ The world time in minutes
+  | TimeUpdate   Int64 --  The world time in minutes
 
   | EntityEquipment EntityId
                     SlotId
-                    Int16 -- ^ Item ID
-                    Int16 -- ^ Damage?
+                    Int16 --  Item ID
+                    Int16 --  Damage?
 
-  | SpawnPosition Int32 -- ^ X
-                  Int32 -- ^ Y
-                  Int32 -- ^ Z
+  | SpawnPosition Int32 --  X
+                  Int32 --  Y
+                  Int32 --  Z
 
-  | UseEntity EntityId -- ^ User
-              EntityId -- ^ Target
-              Bool -- ^ Left-click?
+  | UseEntity EntityId --  User
+              EntityId --  Target
+              Bool --  Left-click?
 
-  | UpdateHealth Int16 -- ^ Health: 0--20
+  | UpdateHealth Int16 --  Health: 0--20
 
   | Respawn
 
-  | Player Bool -- ^ On Ground
+  | Player Bool --  On Ground
 
-  | PlayerPosition Double -- ^ X
-                   Double -- ^ Y
-                   Double -- ^ Stance
-                   Double -- ^ Z
-                   Bool   -- ^ On ground
+  | PlayerPosition Double --  X
+                   Double --  Y
+                   Double --  Stance
+                   Double --  Z
+                   Bool   --  On ground
 
-  | PlayerLook Float -- ^ Yaw
-               Float -- ^ Pitch
-               Bool -- ^ On Ground
+  | PlayerLook Float --  Yaw
+               Float --  Pitch
+               Bool --  On Ground
 
   | PlayerPositionLook
-                   Double -- ^ X
-                   Double -- ^ Y
-                   Double -- ^ Stance
-                   Double -- ^ Z
-                   Float -- ^ Yaw
-                   Float -- ^ Pitch
-                   Bool -- ^ On Ground
+                   Double --  X
+                   Double --  Y
+                   Double --  Stance
+                   Double --  Z
+                   Float --  Yaw
+                   Float --  Pitch
+                   Bool --  On Ground
 
   | PlayerDigging DiggingStatus
-                  Int32 -- ^ X
-                  Int8 -- ^ Y
-                  Int32 -- ^ Z
+                  Int32 --  X
+                  Int8 --  Y
+                  Int32 --  Z
                   Face
 
   | PlayerBlockPlacement
-                  Int32 -- ^ X
-                  Int8 -- ^ Y
-                  Int32 -- ^ Z
+                  Int32 --  X
+                  Int8 --  Y
+                  Int32 --  Z
                   Face
-                  (Maybe (Int16, Int8, Int16)) -- ^ Optional block, count, and use
+                  (Maybe (Int16, Int8, Int16)) --  Optional block, count, and use
 
-  | HoldingChange Int16 -- ^ Slot
+  | HoldingChange Int16 --  Slot
 
-  | Animation EntityId -- ^ Player ID
+  | Animation EntityId --  Player ID
               Animate
 
-  | EntityAction EntityId -- ^ Player ID
+  | EntityAction EntityId --  Player ID
                  Action
 
-  | NamedEntitySpawn EntityId -- ^ Player ID
-                     String -- ^ Player Name
-                     Int32 -- ^ X
-                     Int32 -- ^ Y
-                     Int32 -- ^ Z
-                     Int8 -- ^ Rotation
-                     Int8 -- ^ Pitch
-                     Int16 -- ^ Current Item
+  | NamedEntitySpawn EntityId --  Player ID
+                     String --  Player Name
+                     Int32 --  X
+                     Int32 --  Y
+                     Int32 --  Z
+                     Int8 --  Rotation
+                     Int8 --  Pitch
+                     Int16 --  Current Item
 
-  | PickupSpawn EntityId -- ^ Player ID
-                Int16 -- ^ Item ID
-                Int8  -- ^ Count
-                Int16  -- ^ Damage?
-                Int32 -- ^ X
-                Int32 -- ^ Y
-                Int32 -- ^ Z
-                Int8 -- ^ Rotation
-                Int8 -- ^ Pitch
-                Int8 -- ^ Roll
+  | PickupSpawn EntityId --  Player ID
+                Int16 --  Item ID
+                Int8  --  Count
+                Int16  --  Damage?
+                Int32 --  X
+                Int32 --  Y
+                Int32 --  Z
+                Int8 --  Rotation
+                Int8 --  Pitch
+                Int8 --  Roll
 
-  | CollectItem EntityId -- ^ Collected
-                EntityId -- ^ Collector
+  | CollectItem EntityId --  Collected
+                EntityId --  Collector
 
   | AddObject EntityId
-              Int8  -- ^ Type ID
-              Int32 -- ^ X
-              Int32 -- ^ Y
-              Int32 -- ^ Z
+              Int8  --  Type ID
+              Int32 --  X
+              Int32 --  Y
+              Int32 --  Z
 
   | MobSpawn EntityId
-             MobId -- ^ Mob ID
-             Int32 -- ^ X
-             Int32 -- ^ Y
-             Int32 -- ^ Z
-             Int8  -- ^ Yaw
-             Int8  -- ^ Pitch
+             MobId --  Mob ID
+             Int32 --  X
+             Int32 --  Y
+             Int32 --  Z
+             Int8  --  Yaw
+             Int8  --  Pitch
              Metadata
 
   | Painting EntityId
-             String -- ^ Name of painting
-             Int32 -- ^ X
-             Int32 -- ^ Y
-             Int32 -- ^ Z
-             Int32 -- ^ Graphic ID
+             String --  Name of painting
+             Int32 --  X
+             Int32 --  Y
+             Int32 --  Z
+             Int32 --  Graphic ID
 
   | EntityVelocity EntityId
-                   Int16 -- ^ X Velocity
-                   Int16 -- ^ Y Velocity
-                   Int16 -- ^ Z Velocity
+                   Int16 --  X Velocity
+                   Int16 --  Y Velocity
+                   Int16 --  Z Velocity
 
   | DestroyEntity EntityId
 
   | Entity EntityId
 
   | EntityRelativeMove EntityId
-                       Int8 -- ^ Change in X
-                       Int8 -- ^ Change in Y
-                       Int8 -- ^ Change in Z
+                       Int8 --  Change in X
+                       Int8 --  Change in Y
+                       Int8 --  Change in Z
 
   | EntityLook EntityId
-               Int8 -- ^ Yaw
-               Int8 -- ^ Pitch
+               Int8 --  Yaw
+               Int8 --  Pitch
 
   | EntityLookMove EntityId
-                   Int8  -- ^ dX
-                   Int8  -- ^ dY
-                   Int8  -- ^ dZ
-                   Int8  -- ^ Yaw
-                   Int8  -- ^ Pitch
+                   Int8  --  dX
+                   Int8  --  dY
+                   Int8  --  dZ
+                   Int8  --  Yaw
+                   Int8  --  Pitch
 
   | EntityTeleport EntityId
-                   Int32 -- ^ X
-                   Int32 -- ^ Y
-                   Int32 -- ^ Z
-                   Int8  -- ^ Yaw
-                   Int8  -- ^ Pitch
+                   Int32 --  X
+                   Int32 --  Y
+                   Int32 --  Z
+                   Int8  --  Yaw
+                   Int8  --  Pitch
 
   | EntityStatus EntityId
-                 Int8 -- ^ Status
+                 Int8 --  Status
 
-  | AttachEntity EntityId -- ^ Entity ID
-                 EntityId -- ^ Vehicle ID
+  | AttachEntity EntityId --  Entity ID
+                 EntityId --  Vehicle ID
 
   | EntityMetadata EntityId Metadata
 
-  | Prechunk Int32 -- ^ X
-             Int32 -- ^ Z
-             Bool  -- ^ Load on True, Unload on False
+  | Prechunk Int32 --  X
+             Int32 --  Z
+             Bool  --  Load on True, Unload on False
 
-  | Mapchunk Int32 -- ^ X
-             Int16 -- ^ Y
-             Int32 -- ^ Z
-             Int8  -- ^ X length
-             Int8  -- ^ Y length
-             Int8  -- ^ Z length
-             Data.ByteString.Lazy.ByteString -- ^ ZLib Deflate compressed data
+  | Mapchunk Int32 --  X
+             Int16 --  Y
+             Int32 --  Z
+             Int8  --  X length
+             Int8  --  Y length
+             Int8  --  Z length
+             Data.ByteString.Lazy.ByteString --  ZLib Deflate compressed data
 
-  | MultiblockChange Int32 -- ^ Chunk X
-                     Int32 -- ^ Chunk Z
-                     [(Int16, BlockId, Int8)] -- ^ Coordinate, Block type, Meta
+  | MultiblockChange Int32 --  Chunk X
+                     Int32 --  Chunk Z
+                     [(Int16, BlockId, Int8)] --  Coordinate, Block type, Meta
 
-  | BlockChange Int32 -- ^ Block X
-                Int8  -- ^ Block Y
-                Int32 -- ^ Block Z
+  | BlockChange Int32 --  Block X
+                Int8  --  Block Y
+                Int32 --  Block Z
                 BlockId
-                Int8  -- ^ Block metadata
+                Int8  --  Block metadata
 
-  | PlayNote Int32 -- ^ Block X
-             Int16 -- ^ Block Y
-             Int32 -- ^ Block Z
+  | PlayNote Int32 --  Block X
+             Int16 --  Block Y
+             Int32 --  Block Z
              InstrumentType
-             Int8  -- ^ Pitch
+             Int8  --  Pitch
 
-  | Explosion Double -- ^ X
-              Double -- ^ Y
-              Double -- ^ Z
-              Float  -- ^ Radius?
-              [(Int8,Int8,Int8)] -- ^ Relative X,Y,Z of affected blocks
+  | Explosion Double --  X
+              Double --  Y
+              Double --  Z
+              Float  --  Radius?
+              [(Int8,Int8,Int8)] --  Relative X,Y,Z of affected blocks
 
   | OpenWindow WindowId
                InventoryType
-               String -- ^ Title
-               Int8 -- ^ Number of slots
+               String --  Title
+               Int8 --  Number of slots
 
   | CloseWindow WindowId
 
   | WindowClick WindowId
                 SlotId
-                Bool -- ^ Right-click
+                Bool --  Right-click
                 TransactionId
-                (Maybe (Int16, Int8, Int16)) -- ^ Optional Item, Count, Uses
+                (Maybe (Int16, Int8, Int16)) --  Optional Item, Count, Uses
 
   | SetSlot WindowId
             SlotId
-            (Maybe (Int16, Int8, Int16)) -- ^ Item, Count and Use
+            (Maybe (Int16, Int8, Int16)) --  Item, Count and Use
 
   | WindowItems WindowId
-                [Maybe (Int16, Int8, Int16)] -- ^ List of slots (Item ID, Count, Uses)
+                [Maybe (Int16, Int8, Int16)] --  List of slots (Item ID, Count, Uses)
   | UpdateProgressBar WindowId
-                      Int16 -- ^ Progress bar ID
-                      Int16 -- ^ Value
+                      Int16 --  Progress bar ID
+                      Int16 --  Value
 
   | Transaction WindowId
                 TransactionId
-                Bool -- ^ Success
+                Bool --  Success
 
-  | UpdateSign Int32 -- ^ X
-               Int16 -- ^ Y
-               Int32 -- ^ Z
-               String -- ^ Text on line 1
-               String -- ^ Text on line 2
-               String -- ^ Text on line 3
-               String -- ^ Text on line 4
+  | UpdateSign Int32  --  X
+               Int16  --  Y
+               Int32  --  Z
+               String --  Text on line 1
+               String --  Text on line 2
+               String --  Text on line 3
+               String --  Text on line 4
 
-  | Disconnect   String -- ^ Reason
+  | Disconnect   String --  Reason
 
   deriving (Show, Read)
 
