@@ -261,6 +261,15 @@ data Message
 
   deriving (Show, Read)
 
+class AutoGet a where
+  autoGet :: a -> Get Message
+
+instance AutoGet Message where
+  autoGet m = return m
+
+instance (JavaBinary x, AutoGet y) => AutoGet (x -> y) where
+  autoGet f = autoGet . f =<< getJ
+
 instance JavaBinary Message where
   getJ = getMessage
   putJ = putMessage
@@ -328,7 +337,7 @@ data MobId
   | Cow
   | Hen
   | OtherMob Int8
-  deriving (Show, Read)
+  deriving (Show, Read, Eq)
 
 instance JavaBinary MobId where
 
@@ -766,50 +775,42 @@ getMessage = do
   tag <- getJ
   case tag :: Int8 of
     0x00 -> return KeepAliv
-    0x01 -> LoginRequest         <$> getJ <*> getString <*> getString <*> getJ
-                                 <*> getJ
-    0x02 -> Handshake            <$> getString
-    0x03 -> Chat                 <$> getString
-    0x04 -> TimeUpdate           <$> getJ
-    0x05 -> EntityEquipment      <$> getJ <*> getJ <*> getJ <*> getJ
-    0x06 -> SpawnPosition        <$> getJ <*> getJ <*> getJ
-    0x07 -> UseEntity            <$> getJ <*> getJ <*> getJ
-    0x08 -> UpdateHealth         <$> getJ
-    0x09 -> return Respawn
-    0x0a -> Player               <$> getJ
-    0x0b -> PlayerPosition       <$> getJ <*> getJ <*> getJ <*> getJ <*> getJ
-    0x0c -> PlayerLook           <$> getJ <*> getJ <*> getJ
-    0x0d -> PlayerPositionLook   <$> getJ <*> getJ <*> getJ <*> getJ <*> getJ
-                                 <*> getJ <*> getJ
-    0x0e -> PlayerDigging        <$> getJ <*> getJ <*> getJ <*> getJ <*> getJ
+    0x01 -> autoGet LoginRequest
+    0x02 -> autoGet Handshake
+    0x03 -> autoGet Chat
+    0x04 -> autoGet TimeUpdate
+    0x05 -> autoGet EntityEquipment
+    0x06 -> autoGet SpawnPosition
+    0x07 -> autoGet UseEntity
+    0x08 -> autoGet UpdateHealth
+    0x09 -> autoGet Respawn
+    0x0a -> autoGet Player
+    0x0b -> autoGet PlayerPosition
+    0x0c -> autoGet PlayerLook
+    0x0d -> autoGet PlayerPositionLook
+    0x0e -> autoGet PlayerDigging
     0x0f -> PlayerBlockPlacement <$> getJ <*> getJ <*> getJ <*> getJ
                                  <*> getItemTriple
-    0x10 -> HoldingChange        <$> getJ
-    0x12 -> Animation            <$> getJ <*> getJ
-    0x13 -> EntityAction         <$> getJ <*> getJ
-    0x14 -> NamedEntitySpawn     <$> getJ <*> getString <*> getJ <*> getJ <*> getJ
-                                 <*> getJ <*> getJ <*> getJ
-    0x15 -> PickupSpawn          <$> getJ <*> getJ <*> getJ <*> getJ <*> getJ
-                                 <*> getJ <*> getJ <*> getJ <*> getJ <*> getJ
-    0x16 -> CollectItem          <$> getJ <*> getJ
-    0x17 -> AddObject            <$> getJ <*> getJ <*> getJ <*> getJ <*> getJ
-    0x18 -> MobSpawn             <$> getJ <*> getJ <*> getJ <*> getJ <*> getJ
-                                 <*> getJ <*> getJ <*> getJ
-    0x19 -> Painting             <$> getJ <*> getString <*> getJ <*> getJ <*> getJ
-                                 <*> getJ
-    0x1c -> EntityVelocity       <$> getJ <*> getJ <*> getJ <*> getJ
-    0x1d -> DestroyEntity        <$> getJ
-    0x1e -> Entity               <$> getJ
-    0x1f -> EntityRelativeMove   <$> getJ <*> getJ <*> getJ <*> getJ
-    0x20 -> EntityLook           <$> getJ <*> getJ <*> getJ
-    0x21 -> EntityLookMove       <$> getJ <*> getJ <*> getJ <*> getJ <*> getJ
-                                 <*> getJ
-    0x22 -> EntityTeleport       <$> getJ <*> getJ <*> getJ <*> getJ <*> getJ
-                                 <*> getJ
-    0x26 -> EntityStatus         <$> getJ <*> getJ
-    0x27 -> AttachEntity         <$> getJ <*> getJ
-    0x28 -> EntityMetadata       <$> getJ <*> getJ
-    0x32 -> Prechunk             <$> getJ <*> getJ <*> getJ
+    0x10 -> autoGet HoldingChange
+    0x12 -> autoGet Animation
+    0x13 -> autoGet EntityAction
+    0x14 -> autoGet NamedEntitySpawn
+    0x15 -> autoGet PickupSpawn
+    0x16 -> autoGet CollectItem
+    0x17 -> autoGet AddObject
+    0x18 -> autoGet MobSpawn
+    0x19 -> autoGet Painting
+    0x1c -> autoGet EntityVelocity
+    0x1d -> autoGet DestroyEntity
+    0x1e -> autoGet Entity
+    0x1f -> autoGet EntityRelativeMove
+    0x20 -> autoGet EntityLook
+    0x21 -> autoGet EntityLookMove
+    0x22 -> autoGet EntityTeleport
+    0x26 -> autoGet EntityStatus
+    0x27 -> autoGet AttachEntity
+    0x28 -> autoGet EntityMetadata
+    0x32 -> autoGet Prechunk
     0x33 -> Mapchunk             <$> getJ <*> getJ <*> getJ <*> getJ <*> getJ
                                  <*> getJ <*> getLazyByteString32
     0x34 -> MultiblockChange <$> getJ <*> getJ <*> changes
@@ -818,12 +819,12 @@ getMessage = do
               zip3 <$> replicateM (fromIntegral sz) getJ
                    <*> replicateM (fromIntegral sz) getJ
                    <*> replicateM (fromIntegral sz) getJ
-    0x35 -> BlockChange          <$> getJ <*> getJ <*> getJ <*> getJ <*> getJ
-    0x36 -> PlayNote             <$> getJ <*> getJ <*> getJ <*> getJ <*> getJ
+    0x35 -> autoGet BlockChange
+    0x36 -> autoGet PlayNote
     0x3c -> Explosion            <$> getJ <*> getJ <*> getJ <*> getJ <*>
                (getWord32be >>= \ len -> replicateM (fromIntegral len) getJ)
-    0x64 -> OpenWindow           <$> getJ <*> getJ <*> getString <*> getJ
-    0x65 -> CloseWindow          <$> getJ
+    0x64 -> autoGet OpenWindow
+    0x65 -> autoGet CloseWindow
     0x66 -> WindowClick          <$> getJ <*> getJ <*> getJ <*> getJ
                                  <*> getItemTriple
     0x67 -> SetSlot              <$> getJ <*> getJ <*> getItemTriple
@@ -831,11 +832,10 @@ getMessage = do
       where items = do count <- getWord16be
                        replicateM (fromIntegral count) getItemTriple
                          
-    0x69 -> UpdateProgressBar    <$> getJ <*> getJ <*> getJ
-    0x6a -> Transaction          <$> getJ <*> getJ <*> getJ
-    0x82 -> UpdateSign           <$> getJ <*> getJ <*> getJ <*> getString
-                                 <*> getString <*> getString <*> getString
-    0xff -> Disconnect           <$> getString
+    0x69 -> autoGet UpdateProgressBar
+    0x6a -> autoGet Transaction
+    0x82 -> autoGet UpdateSign
+    0xff -> autoGet Disconnect
     _ -> error $ "Unknown packet " ++ show tag
 
 putMessage :: Message -> Put
@@ -843,16 +843,16 @@ putMessage KeepAliv = putJ (0x00 :: MessageTag)
 putMessage (LoginRequest ver usr pw x y) = do
   putJ (0x01 :: MessageTag)
   putJ ver
-  putString usr
-  putString pw
+  putJ usr
+  putJ pw
   putJ x
   putJ y
 putMessage (Handshake usr) = do
   putJ (0x02 :: MessageTag)
-  putString usr
+  putJ usr
 putMessage (Chat msg) = do
   putJ (0x03 :: MessageTag)
-  putString msg
+  putJ msg
 putMessage (TimeUpdate time) = do
   putJ (0x04 :: MessageTag)
   putJ time
@@ -942,7 +942,7 @@ putMessage (EntityAction eid act) = do
 putMessage (NamedEntitySpawn eid name x y z rot pitch item) = do
   putJ (0x14 :: MessageTag)
   putJ eid
-  putString name
+  putJ name
   putJ x
   putJ y
   putJ z
@@ -990,7 +990,7 @@ putMessage (MobSpawn eid ty x y z yaw pitch meta) = do
 putMessage (Painting eid title x y z ty) = do
   putJ (0x19 :: MessageTag)
   putJ eid
-  putString title
+  putJ title
   putJ x
   putJ y
   putJ z
@@ -1115,7 +1115,7 @@ putMessage (OpenWindow wid ty title slots) = do
   putJ (0x64 :: MessageTag)
   putJ wid
   putJ ty
-  putString title
+  putJ title
   putJ slots
   
 putMessage (CloseWindow wid) = do
@@ -1159,24 +1159,14 @@ putMessage (UpdateSign x y z tx1 tx2 tx3 tx4) = do
   putJ x
   putJ y
   putJ z
-  putString tx1
-  putString tx2
-  putString tx3
-  putString tx4
+  putJ tx1
+  putJ tx2
+  putJ tx3
+  putJ tx4
 
 putMessage (Disconnect reason) = do
   putJ (0xff :: MessageTag)
-  putString reason
-
-getString :: Get String
-getString = do
-  len <- getWord16be
-  Data.ByteString.Char8.unpack `fmap` getByteString (fromIntegral len)
-
-putString :: String -> Put
-putString xs = do
-  putJ (fromIntegral (length xs) :: Int16)
-  putByteString (Data.ByteString.Char8.pack xs)
+  putJ reason
 
 splitMessage :: Data.ByteString.Lazy.ByteString ->
                 (Message, Data.ByteString.Lazy.ByteString)

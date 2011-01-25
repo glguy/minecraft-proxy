@@ -3,6 +3,7 @@ module Main where
 import Protocol
 
 import Codec.Compression.Zlib
+import Control.Applicative
 import Control.Concurrent
 import Control.Exception
 import Control.Monad
@@ -14,6 +15,7 @@ import Data.Foldable
 import Data.IORef
 import Data.Int
 import Data.Map (Map)
+import Data.List (isPrefixOf)
 import Network.Socket hiding (send)
 import Network.Socket.ByteString.Lazy
 import Prelude hiding (getContents)
@@ -21,8 +23,8 @@ import System.Environment
 import System.Exit
 import qualified Data.Map as Map
 import qualified Network
-
-type EntityMap = Map EntityId (Either String MobId, Int32, Int32, Int32)
+import JavaBinary
+import GameState
 
 main :: IO ()
 main = do
@@ -53,7 +55,7 @@ main = do
 proxy :: Socket -> Socket -> IO a
 proxy c s = do
   var <- newEmptyMVar
-  emap <- newIORef Map.empty
+  emap <- newIORef newGameState
   glassvar <- newIORef False
   follow <- newIORef Nothing
   chan <- newChan
@@ -68,51 +70,14 @@ proxy c s = do
                  `finally` putMVar var "outbound network" 
   _ <- forkIO $ do
           cbs <- getContents c
-          proxy1 cbs schan (outboundLogic follow emap glassvar)
+          proxy1 cbs schan (outboundLogic chan follow emap glassvar)
          `finally` putMVar var "outbound"
   who <- takeMVar var
   putStr who
   putStrLn " died"
   exitFailure
 
--- | Update the state of the entity map and return the Entity ID
--- of the entity that changed, if any.
-updateEntityMap :: IORef EntityMap -> Message -> IO (Maybe EntityId)
-updateEntityMap emap (NamedEntitySpawn eid name x y z _ _ _) = do
-  atomicModifyIORef_ emap $ Map.insert eid (Left name, x, y, z)
-  return (Just eid)
-
-updateEntityMap emap (MobSpawn eid ty x y z _ _ _) = do
-  atomicModifyIORef_ emap $ Map.insert eid (Right ty, x, y, z)
-  return (Just eid)
-
-updateEntityMap emap (EntityTeleport eid x y z _ _) = do
-  atomicModifyIORef_ emap $ Map.update (\ (ty,_,_,_) -> Just (ty, x, y, z)) eid
-  return (Just eid)
-
-updateEntityMap emap (EntityRelativeMove eid dX dY dZ) = do
-  atomicModifyIORef_ emap
-         $ Map.update (\ (ty,x,y,z) -> Just (ty, x + fromIntegral dX,
-                                                 y + fromIntegral dY,
-                                                 z + fromIntegral dZ)) eid
-  return (Just eid)
-
-updateEntityMap emap (EntityLookMove eid dX dY dZ _ _) = do
-  atomicModifyIORef_ emap
-         $ Map.update (\ (ty,x,y,z) -> Just (ty, x + fromIntegral dX,
-                                                 y + fromIntegral dY,
-                                                 z + fromIntegral dZ)) eid
-  return (Just eid)
-
-updateEntityMap emap (DestroyEntity eid) = do
-  atomicModifyIORef_ emap $ Map.delete eid
-  return (Just eid)
-
-updateEntityMap _ _ = return Nothing
-
-processChunk sx sy sz bs
-  | L.length blight /= L.length slight = error "bad"
-  | otherwise = compress bigbs'
+processChunk sx sy sz bs = compress bigbs'
   where
   bigbs = decompress bs
   block_count = (fromIntegral sx + 1)
@@ -120,22 +85,17 @@ processChunk sx sy sz bs
               * (fromIntegral sz + 1)
 
   (blocks,bigbs1) = L.splitAt block_count bigbs
-  (metas ,bigbs2) = L.splitAt (block_count `div` 2) bigbs1
-  (blight ,slight) = L.splitAt (block_count `div` 2) bigbs2
-  blocks' = L.map (\x -> if x == 0x1 then 0x14 else if x == 0x38 then 0x59 else x) blocks
-  diamonds = L.findIndices (\x -> x == 0x1 || x == 0x38) blocks
-  bigbs' = L.concat [blocks', bigbs1] -- metas, blight, slight]
+  blocks' = L.map makeClear blocks
+  bigbs' = L.append blocks' bigbs1
 
-updateLights changeset = snd . L.mapAccumL aux (0, changeset)
-  where
-  aux (i,[]) b = ((i+1,[]),b)
-  aux (i,x:xs) b
-    | 2*i == x = aux (i,xs) 0xff
-    | 2*i+1 == x = ((i+1,xs), 0xff)
-    | otherwise = ((i+1,xs), b)
+  makeClear 0x01 = 0x14
+  makeClear 0x02 = 0x14
+  makeClear 0x03 = 0x14
+  makeClear 0x38 = 0x59
+  makeClear x    = x
 
 inboundLogic :: IORef (Maybe EntityId) ->
-                IORef EntityMap ->
+                IORef GameState ->
                 IORef Bool ->
                 Message ->
                 IO [Message]
@@ -153,46 +113,73 @@ inboundLogic follow emap glassvar msg = do
     Mapchunk x y z sx sy sz bs -> return ()
     _ -> putStrLn $ "inbound: " ++ show msg
 
-  changedEid <- updateEntityMap emap msg
+{-
+  changedEid <- atomicModifyIORef emap $ \ gs ->
+                       let (change, gs') = updateGameState msg gs
+                       in (gs', gs' `seq` change)
+  changedEid `seq` return ()
 
   glass <- readIORef glassvar
   let msg' = case msg of
-               Mapchunk x y z sx sy sz bs | glass -> Mapchunk x y z sx sy sz $ processChunk sx sy sz bs
+               Mapchunk x y z sx sy sz bs
+                 | glass -> Mapchunk x y z sx sy sz $ processChunk sx sy sz bs
                _ -> msg
 
   interested <- readIORef follow
   case interested of
     Just ieid | interested == changedEid -> do
-     e <- readIORef emap
+     e <- entityMap <$> readIORef emap
      case Map.lookup ieid e of
        Just (_ty, x, y, z) ->
          return [SpawnPosition (x `div` 32) (y `div` 32) (z `div` 32),msg']
        _ -> return [msg']
     _ -> return [msg']
+  -}
+  return [msg]
+
+processCommand cchan follow emap glassvar "glass on"
+  =  writeIORef glassvar True
+  *> tellPlayer cchan "Glass On"
+  *> return []
+
+processCommand cchan follow emap glassvar "glass off"
+  =  writeIORef glassvar False
+  *> tellPlayer cchan "Glass Off"
+  *> return []
+
+processCommand cchan follow emap glassvar text
+  | "follow " `isPrefixOf` text
+  = case reads key of
+      [(eid, _)] -> do writeIORef follow $ Just $ EID eid
+                       tellPlayer cchan "Follow registered"
+      _ -> do e <- entityMap <$> readIORef emap
+              case find (\ (_,(x,_,_,_)) -> x == Left key) (Map.assocs e) of
+                Just (k,_) -> writeIORef follow (Just k)
+                 *>  tellPlayer cchan "Follow registered"
+                Nothing -> tellPlayer cchan "Player not found"
+  *> return []
+  where key = drop 7 text
+
+processCommand cchan follow emap glassvar _ = do
+  tellPlayer cchan "Command not understood"
+  return []
+
+tellPlayer cchan text = writeChan cchan $ encode $ Chat $ "\194\167\&6" ++ text
      
-outboundLogic :: IORef (Maybe EntityId) ->
-                 IORef EntityMap ->
+outboundLogic :: Chan ByteString ->
+                 IORef (Maybe EntityId) ->
+                 IORef GameState ->
                  IORef Bool ->
                  Message ->
                  IO [Message]
-outboundLogic follow emap glassvar msg = do
+outboundLogic cchan follow emap glassvar msg = do
   case msg of
     PlayerPosition {} -> return [msg]
     PlayerPositionLook {} -> return [msg]
     PlayerLook {} -> return [msg]
     Player {} -> return [msg]
     KeepAliv -> return [msg]
-    Chat ('F':xs) -> do case reads xs of
-                          [(eid,_)] -> writeIORef follow eid
-                          _ -> return ()
-                        return []
-    Chat "E" -> do
-       e <- readIORef emap
-       print $ Map.map (\ (ty,x,y,z) -> (ty, x`div`32, y`div`32,z`div`32)) e
-       return []
-    Chat "G" -> do
-       atomicModifyIORef_ glassvar not
-       return []
+    Chat ('\\':xs) -> processCommand cchan follow emap glassvar xs
                 
     _ -> do putStrLn $ "outbound: " ++ show msg
             return [msg]
@@ -203,6 +190,7 @@ proxy1 :: ByteString -> Chan ByteString -> (Message -> IO [Message])
        -> IO a
 proxy1 bs sock f = do
   let (msg, bs') = splitMessage bs
+  print msg
   msgs <- f msg
   unless (null msgs) $ writeChan sock $ runPut $ traverse_ putMessage msgs
   proxy1 bs' sock f

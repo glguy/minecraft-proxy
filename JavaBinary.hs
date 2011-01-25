@@ -9,6 +9,9 @@ import Data.ByteString.Lazy
 import Data.ByteString.Lazy.UTF8
 import Data.Int
 
+encode :: JavaBinary a => a -> ByteString
+encode = runPut . putJ
+
 class JavaBinary a where
   getJ :: Get a
   putJ :: a -> Put
@@ -44,12 +47,12 @@ instance JavaBinary Bool where
 
 instance JavaBinary String where
   getJ = do
-    len <- getWord32be
+    len <- getWord16be
     bs  <- getLazyByteString (fromIntegral len)
     return (toString bs)
   putJ xs = do
     let bs = fromString xs
-    putWord32be (fromIntegral (Data.ByteString.Lazy.length bs))
+    putWord16be (fromIntegral (Data.ByteString.Lazy.length bs))
     putLazyByteString bs
 
 instance (JavaBinary a, JavaBinary b) => JavaBinary (a,b) where
