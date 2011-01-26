@@ -20,7 +20,7 @@ import JavaBinary
 
 type EntityMap = Map EntityId (Either String MobId, Int32, Int32, Int32)
 
-type BlockMap  = Map (Int32, Int32, Int32) (Map (Int8, Int8, Int8) (BlockId, Int8))
+type BlockMap  = Map (Int32, Int32) (Map (Int8, Int8, Int8) (BlockId, Int8))
 
 data GameState = GS
   { entityMap :: !EntityMap 
@@ -98,9 +98,8 @@ updateGameState (BlockChange x y z blockid meta) gs
 updateGameState _ gs = (Nothing, gs)
 
 
-decomposeCoords :: Int32 -> Int32 -> Int32 -> ((Int32, Int32, Int32), (Int8, Int8, Int8))
+decomposeCoords :: Int32 -> Int32 -> Int32 -> ((Int32, Int32), (Int8, Int8, Int8))
 decomposeCoords x y z = ((x `shiftR` 4
-                        ,y `shiftR` 7
                         ,z `shiftR` 4)
                         ,(fromIntegral $ x .&. 0xf
                         ,fromIntegral $ y .&. 0x7f
@@ -120,7 +119,7 @@ setChunk x y z sx sy sz bs ms bm = Map.alter
               return (x,y,z)
 
 
-setBlocks x z changes = Map.alter (\ x -> Just $! foldl' aux (fromMaybe Map.empty x) changes) (x,0,z)
+setBlocks x z changes = Map.alter (\ x -> Just $! foldl' aux (fromMaybe Map.empty x) changes) (x,z)
   where
   splitCoord c = (fromIntegral $ c `shiftR` 12, fromIntegral $ c .&. 0x7f, fromIntegral $ (c `shiftR` 8) .&. 0xf)
   aux m (coord, ty, meta) = Map.insert (splitCoord coord) (ty, meta) m

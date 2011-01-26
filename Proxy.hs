@@ -184,14 +184,13 @@ outboundLogic cchan follow emap glassvar msg = do
 
 lookupBlock bm chunkC blockC = fmap fst $ Map.lookup blockC =<< Map.lookup chunkC bm
 
-makeGlassUpdate :: BlockMap -> BlockId -> ((Int32,Int32,Int32),[(Int8, Int8,Int8)]) -> [Message]
-makeGlassUpdate bm victim ((cx,0,cz), blocks)
+makeGlassUpdate :: BlockMap -> BlockId -> ((Int32,Int32),[(Int8, Int8,Int8)]) -> [Message]
+makeGlassUpdate bm victim ((cx,cz), blocks)
   | null coords = []
   | otherwise   = [MultiblockChange cx cz [(packCoord c, Glass, 0) | c <- coords]]
   where
-  coords = filter ( \ c -> lookupBlock bm (cx,0,cz) c == Just victim ) blocks
+  coords = filter ( \ c -> lookupBlock bm (cx,cz) c == Just victim ) blocks
   packCoord (x,y,z) = fromIntegral x `shiftL` 12 .|. fromIntegral z `shiftL` 8 .|. fromIntegral y
-makeGlassUpdate _ _ _ = []
 
 chunkedNearby coord = Map.toList $ Map.fromListWith (++) $ map (\ (x,y) -> (x,[y])) $ map (\ (x,y,z) -> decomposeCoords x y z) $ nearby coord
 
