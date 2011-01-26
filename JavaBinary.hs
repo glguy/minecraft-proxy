@@ -62,3 +62,7 @@ instance (JavaBinary a, JavaBinary b) => JavaBinary (a,b) where
 instance (JavaBinary a, JavaBinary b, JavaBinary c) => JavaBinary (a,b,c) where
   getJ = liftA3 (,,) getJ getJ getJ
   putJ (x,y,z) = putJ x *> putJ y *> putJ z
+
+instance (JavaBinary a, JavaBinary b, JavaBinary c, JavaBinary d, JavaBinary e, JavaBinary f) => JavaBinary (a,b,c,d,e,f) where
+  getJ = (,,,,,) <$> getJ <*> getJ <*> getJ <*> getJ <*> getJ <*> getJ
+  putJ (a,b,c,d,e,f) = putJ a *> putJ b *> putJ c *> putJ d *> putJ e *> putJ f

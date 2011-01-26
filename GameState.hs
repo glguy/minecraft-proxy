@@ -86,11 +86,9 @@ updateGameState (SpawnPosition x y z) gs
 updateGameState (TimeUpdate t) gs
   = (Nothing, gs { time = Just t })
 
-{-
-updateGameState (Mapchunk x y z sx sy sz bs) gs
-  = (Nothing, updateBlockMap (setChunk x y z sx sy sz bs) gs)
+updateGameState (Mapchunk x y z sx sy sz bs ms b c) gs
+  = (Nothing, updateBlockMap (setChunk x y z sx sy sz bs ms) gs)
 
--}
 updateGameState (MultiblockChange x z changes) gs
   = (Nothing, updateBlockMap (setBlocks x z changes) gs)
 
@@ -100,19 +98,35 @@ updateGameState (BlockChange x y z blockid meta) gs
 updateGameState _ gs = (Nothing, gs)
 
 
-decomposeCoords :: Int32 -> Int32 -> Int32 -> (Int32, Int32, Int32, Int8, Int8, Int8)
-decomposeCoords x y z = (x `shiftR` 4
+decomposeCoords :: Int32 -> Int32 -> Int32 -> ((Int32, Int32, Int32), (Int8, Int8, Int8))
+decomposeCoords x y z = ((x `shiftR` 4
                         ,y `shiftR` 7
-                        ,z `shiftR` 4
-                        ,fromIntegral $ x .&. 0xf
+                        ,z `shiftR` 4)
+                        ,(fromIntegral $ x .&. 0xf
                         ,fromIntegral $ y .&. 0x7f
-                        ,fromIntegral $ z .&. 0xf
+                        ,fromIntegral $ z .&. 0xf)
                         )
-setBlocks x z changes = Map.alter (\ x -> Just (foldl' aux (fromMaybe Map.empty x) changes)) (x,0,z)
+
+setChunk x y z sx sy sz bs ms bm = Map.alter
+  (\x -> Just $! foldl' aux (fromMaybe Map.empty x) (zip coords bs))
+  chunk
+  bm
+  where
+  aux bm ((x,y,z),b) = Map.insert (x,y,z) (b,0) bm
+  (chunk,(bx,by,bz)) = decomposeCoords x (fromIntegral y) z
+  coords = do x <- take (fromIntegral sx + 1) [bx ..]
+              z <- take (fromIntegral sz + 1) [bz ..]
+              y <- take (fromIntegral sy + 1) [by ..]
+              return (x,y,z)
+
+
+setBlocks x z changes = Map.alter (\ x -> Just $! foldl' aux (fromMaybe Map.empty x) changes) (x,0,z)
   where
   splitCoord c = (fromIntegral $ c `shiftR` 12, fromIntegral $ c .&. 0x7f, fromIntegral $ (c `shiftR` 8) .&. 0xf)
   aux m (coord, ty, meta) = Map.insert (splitCoord coord) (ty, meta) m
 
-setBlock x y z blockid meta = Map.alter (Just . Map.insert (bx,by,bz) (blockid, meta) . fromMaybe Map.empty) (cx,cy,cz)
+setBlock x y z blockid meta = Map.alter
+  (\ x -> Just $! Map.insert block (blockid, meta) (fromMaybe Map.empty x))
+  chunk
   where
-  (cx,cy,cz,bx,by,bz) = decomposeCoords x (fromIntegral y) z
+  (chunk,block) = decomposeCoords x (fromIntegral y) z

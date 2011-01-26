@@ -13,6 +13,7 @@ import Data.Traversable
 import qualified Data.ByteString.Char8
 import qualified Data.ByteString.Lazy
 import JavaBinary
+import Codec.Compression.Zlib
 
 type MessageTag = Int8
 
@@ -26,6 +27,15 @@ newtype WindowId = WID Int8
   deriving (Eq, Ord, Show,Read,JavaBinary)
 
 newtype TransactionId = TID Int16
+  deriving (Eq, Ord, Show,Read,JavaBinary)
+
+newtype ItemId = IID Int16
+  deriving (Eq, Ord, Show,Read,JavaBinary)
+
+newtype ProgressBarId = PID Int16
+  deriving (Eq, Ord, Show,Read,JavaBinary)
+
+newtype GraphicId = GID Int32
   deriving (Eq, Ord, Show,Read,JavaBinary)
 
 data Message
@@ -46,7 +56,7 @@ data Message
 
   | EntityEquipment EntityId
                     SlotId
-                    Int16 --  Item ID
+                    ItemId --  Item ID
                     Int16 --  Damage?
 
   | SpawnPosition Int32 --  X
@@ -71,31 +81,31 @@ data Message
 
   | PlayerLook Float --  Yaw
                Float --  Pitch
-               Bool --  On Ground
+               Bool  --  On Ground
 
   | PlayerPositionLook
                    Double --  X
                    Double --  Y
                    Double --  Stance
                    Double --  Z
-                   Float --  Yaw
-                   Float --  Pitch
-                   Bool --  On Ground
+                   Float  --  Yaw
+                   Float  --  Pitch
+                   Bool   --  On Ground
 
   | PlayerDigging DiggingStatus
                   Int32 --  X
-                  Int8 --  Y
+                  Int8  --  Y
                   Int32 --  Z
                   Face
 
   | PlayerBlockPlacement
                   Int32 --  X
-                  Int8 --  Y
+                  Int8  --  Y
                   Int32 --  Z
                   Face
-                  (Maybe (Int16, Int8, Int16)) --  Optional block, count, and use
+                  (Maybe (ItemId, Int8, Int16)) --  Optional block, count, and use
 
-  | HoldingChange Int16 --  Slot
+  | HoldingChange SlotId
 
   | Animation EntityId --  Player ID
               Animate
@@ -110,10 +120,10 @@ data Message
                      Int32 --  Z
                      Int8 --  Rotation
                      Int8 --  Pitch
-                     Int16 --  Current Item
+                     ItemId --  Current Item
 
   | PickupSpawn EntityId --  Player ID
-                Int16 --  Item ID
+                ItemId
                 Int8  --  Count
                 Int16  --  Damage?
                 Int32 --  X
@@ -146,7 +156,7 @@ data Message
              Int32 --  X
              Int32 --  Y
              Int32 --  Z
-             Int32 --  Graphic ID
+             GraphicId
 
   | EntityVelocity EntityId
                    Int16 --  X Velocity
@@ -198,7 +208,10 @@ data Message
              Int8  --  X length
              Int8  --  Y length
              Int8  --  Z length
-             Data.ByteString.Lazy.ByteString --  ZLib Deflate compressed data
+             [BlockId] 
+             Data.ByteString.Lazy.ByteString
+             Data.ByteString.Lazy.ByteString
+             Data.ByteString.Lazy.ByteString
 
   | MultiblockChange Int32 --  Chunk X
                      Int32 --  Chunk Z
@@ -233,16 +246,16 @@ data Message
                 SlotId
                 Bool --  Right-click
                 TransactionId
-                (Maybe (Int16, Int8, Int16)) --  Optional Item, Count, Uses
+                (Maybe (ItemId, Int8, Int16)) --  Optional Item, Count, Uses
 
   | SetSlot WindowId
             SlotId
-            (Maybe (Int16, Int8, Int16)) --  Item, Count and Use
+            (Maybe (ItemId, Int8, Int16)) --  Item, Count and Use
 
   | WindowItems WindowId
-                [Maybe (Int16, Int8, Int16)] --  List of slots (Item ID, Count, Uses)
+                [Maybe (ItemId, Int8, Int16)] --  List of slots (Item ID, Count, Uses)
   | UpdateProgressBar WindowId
-                      Int16 --  Progress bar ID
+                      ProgressBarId
                       Int16 --  Value
 
   | Transaction WindowId
@@ -257,7 +270,7 @@ data Message
                String --  Text on line 3
                String --  Text on line 4
 
-  | Disconnect   String --  Reason
+  | Disconnect String --  Reason
 
   deriving (Show, Read)
 
@@ -455,7 +468,7 @@ data BlockId
   | Portal
   | JackOLantern
   | Cake
-     deriving (Show, Read)
+     deriving (Show, Read, Eq)
 
 instance JavaBinary BlockId where
   getJ = do
@@ -759,22 +772,27 @@ instance JavaBinary Face where
 getLazyByteString32 :: Get Data.ByteString.Lazy.ByteString
 getLazyByteString32 = getLazyByteString . fromIntegral =<< getWord32be
 
-getItemTriple :: Get (Maybe (Int16, Int8, Int16))
-getItemTriple = do
-  itemid <- getJ
-  if itemid == (-1) then return Nothing
-    else Just <$> ((itemid,,) <$> getJ <*> getJ)
+getMaybe16 :: Get a -> Get (Maybe a)
+getMaybe16 p = do
+  mb <- lookAheadM $ isNil <$> getJ
+  case mb of
+    Nothing -> Just <$> p
+    Just () -> return Nothing
+  where
+  isNil :: Int16 -> Maybe ()
+  isNil x = guard (x == (-1))
 
-putItemTriple :: Maybe (Int16, Int8, Int16) -> Put
-putItemTriple Nothing = putJ (-1 :: Int16)
-putItemTriple (Just x) = putJ x
+
+
+putMaybe16 :: (a -> Put) -> Maybe a -> Put
+putMaybe16 = maybe (putJ (-1 :: Int16))
 
 
 getMessage :: Get Message
 getMessage = do
   tag <- getJ
   case tag :: Int8 of
-    0x00 -> return KeepAliv
+    0x00 -> autoGet KeepAliv
     0x01 -> autoGet LoginRequest
     0x02 -> autoGet Handshake
     0x03 -> autoGet Chat
@@ -790,7 +808,7 @@ getMessage = do
     0x0d -> autoGet PlayerPositionLook
     0x0e -> autoGet PlayerDigging
     0x0f -> PlayerBlockPlacement <$> getJ <*> getJ <*> getJ <*> getJ
-                                 <*> getItemTriple
+                                 <*> getMaybe16 getJ
     0x10 -> autoGet HoldingChange
     0x12 -> autoGet Animation
     0x13 -> autoGet EntityAction
@@ -811,8 +829,21 @@ getMessage = do
     0x27 -> autoGet AttachEntity
     0x28 -> autoGet EntityMetadata
     0x32 -> autoGet Prechunk
-    0x33 -> Mapchunk             <$> getJ <*> getJ <*> getJ <*> getJ <*> getJ
-                                 <*> getJ <*> getLazyByteString32
+    0x33 -> do (x,y,z,sx,sy,sz) <- getJ
+               let block_count = (fromIntegral sx + 1)
+                               * (fromIntegral sy + 1)
+                               * (fromIntegral sz + 1)
+               len <- getJ :: Get Int32
+               compressed <- getLazyByteString (fromIntegral len)
+               let (blocks, metas, blights, slights) = runGet (
+                     (,,,)
+                       <$> replicateM (fromIntegral block_count) getJ
+                       <*> getLazyByteString (block_count `div` 2)
+                       <*> getLazyByteString (block_count `div` 2)
+                       <*> getLazyByteString (block_count `div` 2) )
+                                       (decompress compressed)
+               return $ Mapchunk x y z sx sy sz blocks metas blights slights
+               
     0x34 -> MultiblockChange <$> getJ <*> getJ <*> changes
       where changes = do
               sz <- getJ :: Get Int16
@@ -821,17 +852,19 @@ getMessage = do
                    <*> replicateM (fromIntegral sz) getJ
     0x35 -> autoGet BlockChange
     0x36 -> autoGet PlayNote
-    0x3c -> Explosion            <$> getJ <*> getJ <*> getJ <*> getJ <*>
-               (getWord32be >>= \ len -> replicateM (fromIntegral len) getJ)
+    0x3c -> Explosion            <$> getJ <*> getJ <*> getJ <*> getJ <*> coords
+      where coords = do
+              len <- getJ :: Get Int32
+              replicateM (fromIntegral len) getJ
     0x64 -> autoGet OpenWindow
     0x65 -> autoGet CloseWindow
     0x66 -> WindowClick          <$> getJ <*> getJ <*> getJ <*> getJ
-                                 <*> getItemTriple
-    0x67 -> SetSlot              <$> getJ <*> getJ <*> getItemTriple
+                                 <*> getMaybe16 getJ
+    0x67 -> SetSlot              <$> getJ <*> getJ <*> getMaybe16 getJ
     0x68 -> WindowItems          <$> getJ <*> items
-      where items = do count <- getWord16be
-                       replicateM (fromIntegral count) getItemTriple
-                         
+      where items = do
+              count <- getJ :: Get Int16
+              replicateM (fromIntegral count) (getMaybe16 getJ)
     0x69 -> autoGet UpdateProgressBar
     0x6a -> autoGet Transaction
     0x82 -> autoGet UpdateSign
@@ -923,7 +956,7 @@ putMessage (PlayerBlockPlacement x y z face mbstuff) = do
   putJ y
   putJ z
   putJ face
-  putItemTriple mbstuff
+  putMaybe16 putJ mbstuff
 
 putMessage (HoldingChange slot) = do
   putJ (0x10 :: MessageTag)
@@ -1064,7 +1097,7 @@ putMessage (Prechunk x z mode) = do
   putJ z
   putJ mode
 
-putMessage (Mapchunk x y z szx szy szz bs) = do
+putMessage (Mapchunk x y z szx szy szz bs ms b s) = do
   putJ (0x33 :: MessageTag)
   putJ x
   putJ y
@@ -1072,8 +1105,12 @@ putMessage (Mapchunk x y z szx szy szz bs) = do
   putJ szx
   putJ szy
   putJ szz
-  putWord32be (fromIntegral (Data.ByteString.Lazy.length bs))
-  putLazyByteString bs
+  let compressed = compress $ runPut $ traverse_ putJ bs
+                                     *> putLazyByteString ms
+                                     *> putLazyByteString b
+                                     *> putLazyByteString s
+  putWord32be (fromIntegral (Data.ByteString.Lazy.length compressed))
+  putLazyByteString compressed
 
 
 putMessage (MultiblockChange x z xs) = do
@@ -1128,19 +1165,19 @@ putMessage (WindowClick win slot right act mbstuff) = do
   putJ slot
   putJ right
   putJ act
-  putItemTriple mbstuff
+  putMaybe16 putJ mbstuff
 
 putMessage (SetSlot win slot mbstuff) = do
   putJ (0x67 :: MessageTag)
   putJ win
   putJ slot
-  putItemTriple mbstuff
+  putMaybe16 putJ mbstuff
 
 putMessage (WindowItems win xs) = do
   putJ (0x68 :: MessageTag)
   putJ win
   putWord16be (fromIntegral (length xs))
-  traverse_ putItemTriple xs  
+  traverse_ (putMaybe16 putJ) xs
 
 putMessage (UpdateProgressBar win bar val) = do
   putJ (0x69 :: MessageTag)

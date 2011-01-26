@@ -15,7 +15,7 @@ import Data.Foldable
 import Data.IORef
 import Data.Int
 import Data.Map (Map)
-import Data.List (isPrefixOf)
+import Data.List (groupBy,sort,isPrefixOf)
 import Network.Socket hiding (send)
 import Network.Socket.ByteString.Lazy
 import Prelude hiding (getContents)
@@ -79,23 +79,6 @@ proxy c s = do
   putStrLn " died"
   exitFailure
 
-processChunk sx sy sz bs = compress bigbs'
-  where
-  bigbs = decompress bs
-  block_count = (fromIntegral sx + 1)
-              * (fromIntegral sy + 1)
-              * (fromIntegral sz + 1)
-
-  (blocks,bigbs1) = L.splitAt block_count bigbs
-  blocks' = L.map makeClear blocks
-  bigbs' = L.append blocks' bigbs1
-
-  makeClear 0x01 = 0x14
-  makeClear 0x02 = 0x14
-  makeClear 0x03 = 0x14
-  makeClear 0x38 = 0x59
-  makeClear x    = x
-
 inboundLogic :: IORef (Maybe EntityId) ->
                 IORef GameState ->
                 IORef Bool ->
@@ -112,7 +95,7 @@ inboundLogic follow emap glassvar msg = do
     KeepAliv -> return ()
     Prechunk{} -> return ()
     TimeUpdate {} -> return ()
-    Mapchunk x y z sx sy sz bs -> return ()
+    Mapchunk {} -> return ()
     _ -> putStrLn $ "inbound: " ++ show msg
 
   changedEid <- atomicModifyIORef emap $ \ gs ->
@@ -122,9 +105,13 @@ inboundLogic follow emap glassvar msg = do
 
   glass <- readIORef glassvar
   let msg' = case msg of
-               Mapchunk x y z sx sy sz bs
-                 | glass -> Mapchunk x y z sx sy sz $ processChunk sx sy sz bs
+               Mapchunk x y z sx sy sz bs a b c
+                 | glass -> Mapchunk x y z sx sy sz (map makeGlass bs) a b c
                _ -> msg
+      makeGlass Dirt = Glass
+      makeGlass Stone = Glass
+      makeGlass Grass = Glass
+      makeGlass block = block
 
   interested <- readIORef follow
   case interested of
@@ -178,10 +165,42 @@ outboundLogic cchan follow emap glassvar msg = do
     PlayerLook {} -> return [msg]
     Player {} -> return [msg]
     KeepAliv -> return [msg]
+    PlayerBlockPlacement x y z _ (Just (IID 0x15B, _, _)) -> do
+      tellPlayer cchan "Glass attack!"
+      bm <- blockMap <$> readIORef emap
+      let (chunkC,blockC) = decomposeCoords x (fromIntegral y) z
+      case Map.lookup blockC =<< Map.lookup chunkC bm of
+        Nothing -> return [msg]
+        Just (blockId, meta) -> do
+         print glassMsgs
+         writeChan cchan $ runPut $ traverse_ putJ $ Prelude.concat glassMsgs
+         return []
+         where
+         glassMsgs = map (makeGlassUpdate bm blockId) $ chunkedNearby (x, fromIntegral y, z)
     Chat ('\\':xs) -> processCommand cchan follow emap glassvar xs
                 
     _ -> do putStrLn $ "outbound: " ++ show msg
             return [msg]
+
+lookupBlock bm chunkC blockC = fmap fst $ Map.lookup blockC =<< Map.lookup chunkC bm
+
+makeGlassUpdate :: BlockMap -> BlockId -> ((Int32,Int32,Int32),[(Int8, Int8,Int8)]) -> [Message]
+makeGlassUpdate bm victim ((cx,0,cz), blocks)
+  | null coords = []
+  | otherwise   = [MultiblockChange cx cz [(packCoord c, Glass, 0) | c <- coords]]
+  where
+  coords = filter ( \ c -> lookupBlock bm (cx,0,cz) c == Just victim ) blocks
+  packCoord (x,y,z) = fromIntegral x `shiftL` 12 .|. fromIntegral z `shiftL` 8 .|. fromIntegral y
+makeGlassUpdate _ _ _ = []
+
+chunkedNearby coord = Map.toList $ Map.fromListWith (++) $ map (\ (x,y) -> (x,[y])) $ map (\ (x,y,z) -> decomposeCoords x y z) $ nearby coord
+
+nearby (x,y,z) = sphere
+  where radius = 10
+        inRange (x1,y1,z1) = squared radius > (squared (x1-x) + squared (y1-y) + squared (z1-z))
+        squared x = x * x
+        box = (,,) <$> [x-radius .. x+radius] <*> [y-radius .. y+radius] <*> [z-radius .. z+radius]
+        sphere = filter inRange box
 
 -- | Read a message from the ByteString, process it with the given
 -- continuation, and serialize all resulting mesages to the given channel.
