@@ -113,7 +113,7 @@ decomposeCoords x y z = ((x `shiftR` 4
                         )
 
 packCoords :: (Int8,Int8,Int8) -> Int
-packCoords (x,y,z) = fromIntegral x `shiftL` 12 .|. fromIntegral z `shiftL` 8 .|. fromIntegral y
+packCoords (x,y,z) = fromIntegral x `shiftL` 11 .|. fromIntegral z `shiftL` 7 .|. fromIntegral y
 
 setChunk x y z sx sy sz bs ms bm = Map.alter
   (\x -> Just $! (fromMaybe newVec x) V.// (zip coords bs))
@@ -129,8 +129,11 @@ setChunk x y z sx sy sz bs ms bm = Map.alter
 
 setBlocks x z changes = Map.alter (\ x -> Just $! (fromMaybe newVec x) V.// map aux changes) (x,z)
   where
-  splitCoord c = (fromIntegral $ c `shiftR` 12, fromIntegral $ c .&. 0x7f, fromIntegral $ (c `shiftR` 8) .&. 0xf)
-  aux (coord, ty, meta) = (fromIntegral (fromIntegral coord :: Word16), ty)
+  aux (coord, ty, meta) = (compressCoord coord, ty)
+  compressCoord :: Int16 -> Int
+  compressCoord c = fromIntegral $ (c' .&. 0xff00) `shiftR` 1 .|. c' .&. 0x7f
+   where c' :: Word16
+         c' = fromIntegral c
 
 setBlock :: Int32 -> Int8 -> Int32 -> BlockId -> Int8 -> BlockMap -> BlockMap
 setBlock x y z blockid meta = Map.alter
@@ -139,4 +142,4 @@ setBlock x y z blockid meta = Map.alter
   where
   (chunk,block) = decomposeCoords x (fromIntegral y) z
 
-newVec = V.replicate (16*16*256) Air
+newVec = V.replicate (16*16*128) Air

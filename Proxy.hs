@@ -14,6 +14,7 @@ import Data.Bits
 import Data.Foldable
 import Data.IORef
 import Data.Int
+import Data.Word
 import Data.Map (Map)
 import Data.List (groupBy,sort,isPrefixOf)
 import qualified Data.Vector
@@ -58,6 +59,7 @@ proxy c s = do
   var <- newEmptyMVar
   emap <- newIORef newGameState
   glassvar <- newIORef False
+  digspeed <- newIORef False
   follow <- newIORef Nothing
   chan <- newChan
   schan <- newChan
@@ -65,20 +67,22 @@ proxy c s = do
           sbs <- getContents s
           traverse_ (proxy1 chan (inboundLogic follow emap glassvar))
                     (toMessages sbs)
-         `finally` putMVar var "inbound"
+         `bad` putMVar var "inbound"
   _ <- forkIO $ forever (sendAll c =<< readChan chan )
-                  `finally` putMVar var "inbound network" 
+                  `bad` putMVar var "inbound network" 
   _ <- forkIO $ forever (sendAll s =<< readChan schan )
-                 `finally` putMVar var "outbound network" 
+                 `bad` putMVar var "outbound network" 
   _ <- forkIO $ do
           cbs <- getContents c
-          traverse_ (proxy1 schan (outboundLogic chan follow emap glassvar))
+          traverse_ (proxy1 schan (outboundLogic chan follow emap glassvar digspeed))
                     (toMessages cbs)
-         `finally` putMVar var "outbound"
+         `bad` putMVar var "outbound"
   who <- takeMVar var
   putStr who
   putStrLn " died"
   exitFailure
+  where
+  bad m n = m `Control.Exception.catch` \ (SomeException e) -> print e >> n
 
 inboundLogic :: IORef (Maybe EntityId) ->
                 IORef GameState ->
@@ -124,17 +128,27 @@ inboundLogic follow emap glassvar msg = do
        _ -> return [msg']
     _ -> return [msg']
 
-processCommand cchan follow emap glassvar "glass on"
+processCommand cchan follow emap glassvar digspeed "glass on"
   =  writeIORef glassvar True
   *> tellPlayer cchan "Glass On"
   *> return []
 
-processCommand cchan follow emap glassvar "glass off"
+processCommand cchan follow emap glassvar digspeed "glass off"
   =  writeIORef glassvar False
   *> tellPlayer cchan "Glass Off"
   *> return []
 
-processCommand cchan follow emap glassvar text
+processCommand cchan follow emap glassvar digspeed "dig on"
+  =  writeIORef digspeed True
+  *> tellPlayer cchan "Dig On"
+  *> return []
+
+processCommand cchan follow emap glassvar digspeed "dig off"
+  =  writeIORef digspeed False
+  *> tellPlayer cchan "Dig Off"
+  *> return []
+
+processCommand cchan follow emap glassvar digspeed text
   | "follow " `isPrefixOf` text
   = case reads key of
       [(eid, _)] -> do writeIORef follow $ Just $ EID eid
@@ -147,7 +161,7 @@ processCommand cchan follow emap glassvar text
   *> return []
   where key = drop 7 text
 
-processCommand cchan follow emap glassvar _ = do
+processCommand cchan follow emap glassvar _ _ = do
   tellPlayer cchan "Command not understood"
   return []
 
@@ -157,28 +171,32 @@ outboundLogic :: Chan ByteString ->
                  IORef (Maybe EntityId) ->
                  IORef GameState ->
                  IORef Bool ->
+                 IORef Bool ->
                  Message ->
                  IO [Message]
-outboundLogic cchan follow emap glassvar msg = do
+outboundLogic cchan follow emap glassvar digspeed msg = do
   case msg of
     PlayerPosition {} -> return [msg]
     PlayerPositionLook {} -> return [msg]
     PlayerLook {} -> return [msg]
     Player {} -> return [msg]
     KeepAliv -> return [msg]
+    PlayerDigging Digging x y z face -> do
+     active <- readIORef digspeed
+     if active then return [msg,msg,msg,msg] else return [msg]
     PlayerBlockPlacement x y z _ (Just (IID 0x15B, _, _)) -> do
-      tellPlayer cchan "Glass attack!"
       bm <- blockMap <$> readIORef emap
       let (chunkC,blockC) = decomposeCoords x (fromIntegral y) z
       case fmap (Data.Vector.! packCoords blockC) (Map.lookup chunkC bm) of
-        Nothing -> return [msg]
-        Just blockId -> do
+        Just blockId | blockId /= Air -> do
+         tellPlayer cchan "Glass attack!"
          print glassMsgs
          writeChan cchan $ runPut $ traverse_ putJ $ Prelude.concat glassMsgs
          return []
          where
          glassMsgs = map (makeGlassUpdate bm blockId) $ chunkedNearby (x, fromIntegral y, z)
-    Chat ('\\':xs) -> processCommand cchan follow emap glassvar xs
+        _ -> return [msg]
+    Chat ('\\':xs) -> processCommand cchan follow emap glassvar digspeed xs
                 
     _ -> do putStrLn $ "outbound: " ++ show msg
             return [msg]
@@ -188,9 +206,13 @@ lookupBlock bm chunkC blockC = fmap ((Data.Vector.! packCoords blockC)) (Map.loo
 makeGlassUpdate :: BlockMap -> BlockId -> ((Int32,Int32),[(Int8, Int8,Int8)]) -> [Message]
 makeGlassUpdate bm victim ((cx,cz), blocks)
   | null coords = []
-  | otherwise   = [MultiblockChange cx cz [(fromIntegral $ packCoords c, Glass, 0) | c <- coords]]
+  | otherwise   = [MultiblockChange cx cz [(packCoords' c, Glass, 0) | c <- coords]]
   where
   coords = filter ( \ c -> lookupBlock bm (cx,cz) c == Just victim ) blocks
+  packCoords' (x,y,z) = fromIntegral (fromIntegral x `shiftL` 12
+                                      .|. fromIntegral z `shiftL` 8
+                                      .|. fromIntegral y :: Word16)
+ 
 
 chunkedNearby coord = Map.toList $ Map.fromListWith (++) $ map (\ (x,y) -> (x,[y])) $ map (\ (x,y,z) -> decomposeCoords x y z) $ nearby coord
 
