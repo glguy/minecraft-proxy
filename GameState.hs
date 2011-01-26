@@ -10,17 +10,20 @@ import Data.Foldable (for_)
 import Data.List (foldl')
 import qualified Data.Map as Map
 import Data.Int
+import Data.Word
 import Data.Bits
 import Foreign.ForeignPtr
 import Foreign.Ptr
 import Foreign.Storable
+import qualified Data.Vector as V
+import Data.Vector (Vector)
 
 import Protocol
 import JavaBinary
 
 type EntityMap = Map EntityId (Either String MobId, Int32, Int32, Int32)
 
-type BlockMap  = Map (Int32, Int32) (Map (Int8, Int8, Int8) (BlockId, Int8))
+type BlockMap  = Map (Int32, Int32) (Vector BlockId)
 
 data GameState = GS
   { entityMap :: !EntityMap 
@@ -92,6 +95,9 @@ updateGameState (Mapchunk x y z sx sy sz bs ms b c) gs
 updateGameState (MultiblockChange x z changes) gs
   = (Nothing, updateBlockMap (setBlocks x z changes) gs)
 
+updateGameState (Prechunk x z False) gs
+  = (Nothing, updateBlockMap (Map.delete (x,z)) gs)
+
 updateGameState (BlockChange x y z blockid meta) gs
   = (Nothing, updateBlockMap (setBlock x y z blockid meta) gs)
 
@@ -106,26 +112,31 @@ decomposeCoords x y z = ((x `shiftR` 4
                         ,fromIntegral $ z .&. 0xf)
                         )
 
+packCoords :: (Int8,Int8,Int8) -> Int
+packCoords (x,y,z) = fromIntegral x `shiftL` 12 .|. fromIntegral z `shiftL` 8 .|. fromIntegral y
+
 setChunk x y z sx sy sz bs ms bm = Map.alter
-  (\x -> Just $! foldl' aux (fromMaybe Map.empty x) (zip coords bs))
+  (\x -> Just $! (fromMaybe newVec x) V.// (zip coords bs))
   chunk
   bm
   where
-  aux bm ((x,y,z),b) = Map.insert (x,y,z) (b,0) bm
   (chunk,(bx,by,bz)) = decomposeCoords x (fromIntegral y) z
   coords = do x <- take (fromIntegral sx + 1) [bx ..]
               z <- take (fromIntegral sz + 1) [bz ..]
               y <- take (fromIntegral sy + 1) [by ..]
-              return (x,y,z)
+              return $ packCoords (x,y,z)
 
 
-setBlocks x z changes = Map.alter (\ x -> Just $! foldl' aux (fromMaybe Map.empty x) changes) (x,z)
+setBlocks x z changes = Map.alter (\ x -> Just $! (fromMaybe newVec x) V.// map aux changes) (x,z)
   where
   splitCoord c = (fromIntegral $ c `shiftR` 12, fromIntegral $ c .&. 0x7f, fromIntegral $ (c `shiftR` 8) .&. 0xf)
-  aux m (coord, ty, meta) = Map.insert (splitCoord coord) (ty, meta) m
+  aux (coord, ty, meta) = (fromIntegral (fromIntegral coord :: Word16), ty)
 
+setBlock :: Int32 -> Int8 -> Int32 -> BlockId -> Int8 -> BlockMap -> BlockMap
 setBlock x y z blockid meta = Map.alter
-  (\ x -> Just $! Map.insert block (blockid, meta) (fromMaybe Map.empty x))
+  (\ x -> Just $! (fromMaybe newVec x) V.// [(packCoords block, blockid)] )
   chunk
   where
   (chunk,block) = decomposeCoords x (fromIntegral y) z
+
+newVec = V.replicate (16*16*256) Air

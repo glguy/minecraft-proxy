@@ -16,6 +16,7 @@ import Data.IORef
 import Data.Int
 import Data.Map (Map)
 import Data.List (groupBy,sort,isPrefixOf)
+import qualified Data.Vector
 import Network.Socket hiding (send)
 import Network.Socket.ByteString.Lazy
 import Prelude hiding (getContents)
@@ -169,9 +170,9 @@ outboundLogic cchan follow emap glassvar msg = do
       tellPlayer cchan "Glass attack!"
       bm <- blockMap <$> readIORef emap
       let (chunkC,blockC) = decomposeCoords x (fromIntegral y) z
-      case Map.lookup blockC =<< Map.lookup chunkC bm of
+      case fmap (Data.Vector.! packCoords blockC) (Map.lookup chunkC bm) of
         Nothing -> return [msg]
-        Just (blockId, meta) -> do
+        Just blockId -> do
          print glassMsgs
          writeChan cchan $ runPut $ traverse_ putJ $ Prelude.concat glassMsgs
          return []
@@ -182,15 +183,14 @@ outboundLogic cchan follow emap glassvar msg = do
     _ -> do putStrLn $ "outbound: " ++ show msg
             return [msg]
 
-lookupBlock bm chunkC blockC = fmap fst $ Map.lookup blockC =<< Map.lookup chunkC bm
+lookupBlock bm chunkC blockC = fmap ((Data.Vector.! packCoords blockC)) (Map.lookup chunkC bm)
 
 makeGlassUpdate :: BlockMap -> BlockId -> ((Int32,Int32),[(Int8, Int8,Int8)]) -> [Message]
 makeGlassUpdate bm victim ((cx,cz), blocks)
   | null coords = []
-  | otherwise   = [MultiblockChange cx cz [(packCoord c, Glass, 0) | c <- coords]]
+  | otherwise   = [MultiblockChange cx cz [(fromIntegral $ packCoords c, Glass, 0) | c <- coords]]
   where
   coords = filter ( \ c -> lookupBlock bm (cx,cz) c == Just victim ) blocks
-  packCoord (x,y,z) = fromIntegral x `shiftL` 12 .|. fromIntegral z `shiftL` 8 .|. fromIntegral y
 
 chunkedNearby coord = Map.toList $ Map.fromListWith (++) $ map (\ (x,y) -> (x,[y])) $ map (\ (x,y,z) -> decomposeCoords x y z) $ nearby coord
 
