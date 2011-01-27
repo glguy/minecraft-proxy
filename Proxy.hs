@@ -13,11 +13,11 @@ import Data.ByteString.Lazy (ByteString)
 import Data.Bits
 import Data.Foldable
 import Data.IORef
+import Data.Array.IO
 import Data.Int
 import Data.Word
 import Data.Map (Map)
 import Data.List (groupBy,sort,isPrefixOf)
-import qualified Data.Vector
 import Network.Socket hiding (send)
 import Network.Socket.ByteString.Lazy
 import Prelude hiding (getContents)
@@ -57,10 +57,11 @@ main = do
 proxy :: Socket -> Socket -> IO a
 proxy c s = do
   var <- newEmptyMVar
-  emap <- newIORef newGameState
+  emap <- newMVar newGameState
   glassvar <- newIORef False
   digspeed <- newIORef False
   follow <- newIORef Nothing
+  macro  <- newIORef (False, [])
   chan <- newChan
   schan <- newChan
   _ <- forkIO $ do
@@ -74,7 +75,7 @@ proxy c s = do
                  `bad` putMVar var "outbound network" 
   _ <- forkIO $ do
           cbs <- getContents c
-          traverse_ (proxy1 schan (outboundLogic chan follow emap glassvar digspeed))
+          traverse_ (proxy1 schan (outboundLogic chan follow emap glassvar digspeed macro))
                     (toMessages cbs)
          `bad` putMVar var "outbound"
   who <- takeMVar var
@@ -85,7 +86,7 @@ proxy c s = do
   bad m n = m `Control.Exception.catch` \ (SomeException e) -> print e >> n
 
 inboundLogic :: IORef (Maybe EntityId) ->
-                IORef GameState ->
+                MVar GameState ->
                 IORef Bool ->
                 Message ->
                 IO [Message]
@@ -103,10 +104,9 @@ inboundLogic follow emap glassvar msg = do
     Mapchunk {} -> return ()
     _ -> putStrLn $ "inbound: " ++ show msg
 
-  changedEid <- atomicModifyIORef emap $ \ gs ->
-                       let (change, gs') = updateGameState msg gs
-                       in (gs', gs' `seq` change)
-  changedEid `seq` return ()
+  changedEid <- modifyMVar emap $ \ gs -> do
+                       (change, gs') <- updateGameState msg gs
+                       gs' `seq` return (gs', change)
 
   glass <- readIORef glassvar
   let msg' = case msg of
@@ -121,39 +121,39 @@ inboundLogic follow emap glassvar msg = do
   interested <- readIORef follow
   case interested of
     Just ieid | interested == changedEid -> do
-     e <- entityMap <$> readIORef emap
+     e <- entityMap <$> readMVar emap
      case Map.lookup ieid e of
        Just (_ty, x, y, z) ->
          return [SpawnPosition (x `div` 32) (y `div` 32) (z `div` 32),msg']
        _ -> return [msg']
     _ -> return [msg']
 
-processCommand cchan follow emap glassvar digspeed "glass on"
+processCommand cchan follow emap glassvar digspeed _ "glass on"
   =  writeIORef glassvar True
   *> tellPlayer cchan "Glass On"
   *> return []
 
-processCommand cchan follow emap glassvar digspeed "glass off"
+processCommand cchan follow emap glassvar digspeed _ "glass off"
   =  writeIORef glassvar False
   *> tellPlayer cchan "Glass Off"
   *> return []
 
-processCommand cchan follow emap glassvar digspeed "dig on"
+processCommand cchan follow emap glassvar digspeed _ "dig on"
   =  writeIORef digspeed True
   *> tellPlayer cchan "Dig On"
   *> return []
 
-processCommand cchan follow emap glassvar digspeed "dig off"
+processCommand cchan follow emap glassvar digspeed _ "dig off"
   =  writeIORef digspeed False
   *> tellPlayer cchan "Dig Off"
   *> return []
 
-processCommand cchan follow emap glassvar digspeed text
+processCommand cchan follow emap glassvar digspeed _ text
   | "follow " `isPrefixOf` text
   = case reads key of
       [(eid, _)] -> do writeIORef follow $ Just $ EID eid
                        tellPlayer cchan "Follow registered"
-      _ -> do e <- entityMap <$> readIORef emap
+      _ -> do e <- entityMap <$> readMVar emap
               case find (\ (_,(x,_,_,_)) -> x == Left key) (Map.assocs e) of
                 Just (k,_) -> writeIORef follow (Just k)
                  *>  tellPlayer cchan "Follow registered"
@@ -161,7 +161,20 @@ processCommand cchan follow emap glassvar digspeed text
   *> return []
   where key = drop 7 text
 
-processCommand cchan follow emap glassvar _ _ = do
+processCommand cchan follow emap glassvar digspeed macro "lines on"
+  =  writeIORef macro (True, [])
+  *> tellPlayer cchan "Lines On"
+  *> return []
+
+processCommand cchan follow emap glassvar digspeed macro "lines off"
+  =  do (_ , xs) <- readIORef macro
+        writeIORef macro (False, xs)
+        tellPlayer cchan "Lines Off"
+        return []
+
+
+
+processCommand cchan follow emap glassvar _ _ _ = do
   tellPlayer cchan "Command not understood"
   return []
 
@@ -169,12 +182,16 @@ tellPlayer cchan text = writeChan cchan $ encode $ Chat $ "\194\167\&6" ++ text
      
 outboundLogic :: Chan ByteString ->
                  IORef (Maybe EntityId) ->
-                 IORef GameState ->
+                 MVar GameState ->
                  IORef Bool ->
                  IORef Bool ->
+                 IORef (Bool, [Message]) ->
                  Message ->
                  IO [Message]
-outboundLogic cchan follow emap glassvar digspeed msg = do
+outboundLogic cchan follow emap glassvar digspeed macro msg = do
+
+  (recording, macros) <- readIORef macro
+
   case msg of
     PlayerPosition {} -> return [msg]
     PlayerPositionLook {} -> return [msg]
@@ -185,30 +202,45 @@ outboundLogic cchan follow emap glassvar digspeed msg = do
      active <- readIORef digspeed
      if active then return [msg,msg,msg,msg] else return [msg]
     PlayerBlockPlacement x y z _ (Just (IID 0x15B, _, _)) -> do
-      bm <- blockMap <$> readIORef emap
+      bm <- blockMap <$> readMVar emap
       let (chunkC,blockC) = decomposeCoords x (fromIntegral y) z
-      case fmap (Data.Vector.! packCoords blockC) (Map.lookup chunkC bm) of
-        Just blockId | blockId /= Air -> do
-         tellPlayer cchan "Glass attack!"
-         print glassMsgs
-         writeChan cchan $ runPut $ traverse_ putJ $ Prelude.concat glassMsgs
-         return []
+      case Map.lookup chunkC bm of
+        Just arr -> do
+          blockId <- readArray arr blockC
+          if (blockId /= Air) then do
+            tellPlayer cchan "Glass attack!"
+            glassMsgs <- mapM (makeGlassUpdate bm blockId) $ chunkedNearby (x, fromIntegral y, z)
+            print glassMsgs
+            writeChan cchan $ runPut $ traverse_ putJ $ Prelude.concat glassMsgs
+            return []
+           else return [msg]
          where
-         glassMsgs = map (makeGlassUpdate bm blockId) $ chunkedNearby (x, fromIntegral y, z)
         _ -> return [msg]
-    Chat ('\\':xs) -> processCommand cchan follow emap glassvar digspeed xs
+    PlayerBlockPlacement x1 y1 z1 f o | recording -> case macros of
+      [PlayerBlockPlacement x y z f o] -> do
+        writeIORef macro (recording, [msg])
+        if x == x1 && y == y1 then return [PlayerBlockPlacement x y z2 f o | z2 <- [min z z1 .. max z z1]]
+         else if x == x1 && z == z1 then return [PlayerBlockPlacement x y2 z f o | y2 <- [min y y1 .. max y y1]]
+         else if z == z1 && y == y1 then return [PlayerBlockPlacement x2 y z f o | x2 <- [min x x1 .. max x x1]]
+         else return [msg]
+               
+      _ -> do writeIORef macro (recording, [msg]) *> return [msg]
+    Chat ('\\':xs) -> processCommand cchan follow emap glassvar digspeed macro xs
                 
     _ -> do putStrLn $ "outbound: " ++ show msg
             return [msg]
 
-lookupBlock bm chunkC blockC = fmap ((Data.Vector.! packCoords blockC)) (Map.lookup chunkC bm)
+lookupBlock bm chunkC blockC = do
+  case Map.lookup chunkC bm of
+    Nothing -> return Nothing
+    Just arr -> Just <$> readArray arr blockC
 
-makeGlassUpdate :: BlockMap -> BlockId -> ((Int32,Int32),[(Int8, Int8,Int8)]) -> [Message]
-makeGlassUpdate bm victim ((cx,cz), blocks)
-  | null coords = []
-  | otherwise   = [MultiblockChange cx cz [(packCoords' c, Glass, 0) | c <- coords]]
+makeGlassUpdate :: BlockMap -> BlockId -> ((Int32,Int32),[(Int8, Int8,Int8)]) -> IO [Message]
+makeGlassUpdate bm victim ((cx,cz), blocks) = do
+  coords <- filterM ( \ c -> (== Just victim) <$> lookupBlock bm (cx,cz) c  ) blocks
+  if null coords then return []
+   else return [MultiblockChange cx cz [(packCoords' c, Glass, 0) | c <- coords]]
   where
-  coords = filter ( \ c -> lookupBlock bm (cx,cz) c == Just victim ) blocks
   packCoords' (x,y,z) = fromIntegral (fromIntegral x `shiftL` 12
                                       .|. fromIntegral z `shiftL` 8
                                       .|. fromIntegral y :: Word16)

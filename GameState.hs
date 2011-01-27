@@ -1,5 +1,7 @@
 module GameState where
 
+import Data.Array.IO
+import Control.Monad
 import Data.ByteString (ByteString)
 import qualified Data.ByteString as B
 import qualified Data.ByteString.Lazy as L
@@ -15,15 +17,13 @@ import Data.Bits
 import Foreign.ForeignPtr
 import Foreign.Ptr
 import Foreign.Storable
-import qualified Data.Vector as V
-import Data.Vector (Vector)
 
 import Protocol
 import JavaBinary
 
 type EntityMap = Map EntityId (Either String MobId, Int32, Int32, Int32)
 
-type BlockMap  = Map (Int32, Int32) (Vector BlockId)
+type BlockMap  = Map (Int32, Int32) (IOArray (Int8, Int8, Int8) BlockId)
 
 data GameState = GS
   { entityMap :: !EntityMap 
@@ -40,9 +40,11 @@ updateEntityMap :: (EntityMap -> EntityMap)
 updateEntityMap f gs = gs { entityMap = f (entityMap gs) }
 
 
-updateBlockMap :: (BlockMap -> BlockMap)
-               -> GameState -> GameState
-updateBlockMap f gs = gs { blockMap = f (blockMap gs) }
+updateBlockMap :: (BlockMap -> IO BlockMap)
+               -> GameState -> IO GameState
+updateBlockMap f gs = do
+  m <- f $ blockMap gs
+  return gs { blockMap = m }
 
 
 updateHealth :: (Int16 -> Int16)
@@ -50,20 +52,20 @@ updateHealth :: (Int16 -> Int16)
 updateHealth f gs = gs { health = f (health gs) }
 
 
-updateGameState :: Message -> GameState -> (Maybe EntityId, GameState)
+updateGameState :: Message -> GameState -> IO (Maybe EntityId, GameState)
 
 updateGameState (NamedEntitySpawn eid name x y z _ _ _) gs
-  = (Just eid, updateEntityMap (Map.insert eid (Left name, x, y, z)) gs)
+  = return (Just eid, updateEntityMap (Map.insert eid (Left name, x, y, z)) gs)
 
 updateGameState (MobSpawn eid ty x y z _ _ _) gs
-  = (Just eid, updateEntityMap (Map.insert eid (Right ty, x, y, z)) gs)
+  = return (Just eid, updateEntityMap (Map.insert eid (Right ty, x, y, z)) gs)
 
 updateGameState (EntityTeleport eid x y z _ _) gs
-  = (Just eid,
+  = return (Just eid,
      updateEntityMap (Map.update (\ (ty,_,_,_) -> Just (ty, x, y, z)) eid) gs)
 
 updateGameState (EntityRelativeMove eid dX dY dZ) gs
-  = (Just eid, gs')
+  = return (Just eid, gs')
   where
    gs' = updateEntityMap (Map.update aux eid) gs
    aux (ty,x,y,z) = x' `seq` y' `seq` z' `seq` Just (ty, x', y', z')
@@ -72,36 +74,40 @@ updateGameState (EntityRelativeMove eid dX dY dZ) gs
                 z' = z + fromIntegral dZ
 
 updateGameState (EntityLookMove eid dX dY dZ _ _) gs
-  = (Just eid, updateEntityMap (Map.update aux eid) gs)
+  = return (Just eid, updateEntityMap (Map.update aux eid) gs)
   where aux (ty,x,y,z) = Just (ty, x + fromIntegral dX,
                                    y + fromIntegral dY,
                                    z + fromIntegral dZ)
 
 updateGameState (DestroyEntity eid) gs
-  = (Just eid, updateEntityMap (Map.delete eid) gs)
+  = return (Just eid, updateEntityMap (Map.delete eid) gs)
 
 updateGameState (UpdateHealth x) gs
-  = (Nothing, gs { health = x })
+  = return (Nothing, gs { health = x })
 
 updateGameState (SpawnPosition x y z) gs
-  = (Nothing, gs { spawnLocation = Just (x,y,z) })
+  = return (Nothing, gs { spawnLocation = Just (x,y,z) })
 
 updateGameState (TimeUpdate t) gs
-  = (Nothing, gs { time = Just t })
+  = return (Nothing, gs { time = Just t })
 
 updateGameState (Mapchunk x y z sx sy sz bs ms b c) gs
-  = (Nothing, updateBlockMap (setChunk x y z sx sy sz bs ms) gs)
+  = do gs' <- updateBlockMap (setChunk x y z sx sy sz bs ms) gs
+       return (Nothing, gs')
 
 updateGameState (MultiblockChange x z changes) gs
-  = (Nothing, updateBlockMap (setBlocks x z changes) gs)
+  = do gs' <- updateBlockMap (setBlocks x z changes) gs
+       return (Nothing, gs')
 
 updateGameState (Prechunk x z False) gs
-  = (Nothing, updateBlockMap (Map.delete (x,z)) gs)
+  = do gs' <- updateBlockMap (return . Map.delete (x,z)) gs
+       return (Nothing, gs')
 
 updateGameState (BlockChange x y z blockid meta) gs
-  = (Nothing, updateBlockMap (setBlock x y z blockid meta) gs)
+  = do gs' <- updateBlockMap (setBlock x y z blockid meta) gs
+       return (Nothing, gs')
 
-updateGameState _ gs = (Nothing, gs)
+updateGameState _ gs = return (Nothing, gs)
 
 
 decomposeCoords :: Int32 -> Int32 -> Int32 -> ((Int32, Int32), (Int8, Int8, Int8))
@@ -112,34 +118,41 @@ decomposeCoords x y z = ((x `shiftR` 4
                         ,fromIntegral $ z .&. 0xf)
                         )
 
-packCoords :: (Int8,Int8,Int8) -> Int
-packCoords (x,y,z) = fromIntegral x `shiftL` 11 .|. fromIntegral z `shiftL` 7 .|. fromIntegral y
-
-setChunk x y z sx sy sz bs ms bm = Map.alter
-  (\x -> Just $! (fromMaybe newVec x) V.// (zip coords bs))
-  chunk
-  bm
+setChunk x y z sx sy sz bs ms bm = do
+  (arr,bm') <- case Map.lookup chunk bm of
+                 Nothing -> do arr <- newArray ((0,0,0),(0xf,0x7f,0xf)) Air
+                               return (arr, Map.insert chunk arr bm)
+                 Just arr -> return (arr, bm)
+  
+  zipWithM (writeArray arr) coords bs
+  
+  return bm'
   where
   (chunk,(bx,by,bz)) = decomposeCoords x (fromIntegral y) z
   coords = do x <- take (fromIntegral sx + 1) [bx ..]
               z <- take (fromIntegral sz + 1) [bz ..]
               y <- take (fromIntegral sy + 1) [by ..]
-              return $ packCoords (x,y,z)
+              return (x,y,z)
 
 
-setBlocks x z changes = Map.alter (\ x -> Just $! (fromMaybe newVec x) V.// map aux changes) (x,z)
+setBlocks x z changes bm = do
+  case Map.lookup (x,z) bm of
+    Nothing -> return ()
+    Just arr -> mapM_ (aux arr) changes
+  return bm
+
   where
-  aux (coord, ty, meta) = (compressCoord coord, ty)
-  compressCoord :: Int16 -> Int
-  compressCoord c = fromIntegral $ (c' .&. 0xff00) `shiftR` 1 .|. c' .&. 0x7f
+  aux arr (coord, ty, meta) = writeArray arr (splitCoord coord) ty
+  splitCoord :: Int16 -> (Int8, Int8, Int8)
+  splitCoord c = (fromIntegral (c' `shiftR` 12), fromIntegral (c' .&. 0x7f), fromIntegral (c' `shiftR` 8 .&. 0xf))
    where c' :: Word16
          c' = fromIntegral c
 
-setBlock :: Int32 -> Int8 -> Int32 -> BlockId -> Int8 -> BlockMap -> BlockMap
-setBlock x y z blockid meta = Map.alter
-  (\ x -> Just $! (fromMaybe newVec x) V.// [(packCoords block, blockid)] )
-  chunk
+setBlock :: Int32 -> Int8 -> Int32 -> BlockId -> Int8 -> BlockMap -> IO BlockMap
+setBlock x y z blockid meta bm = do
+  case Map.lookup chunk bm of
+    Nothing -> return ()
+    Just arr -> writeArray arr block blockid
+  return bm
   where
   (chunk,block) = decomposeCoords x (fromIntegral y) z
-
-newVec = V.replicate (16*16*128) Air
