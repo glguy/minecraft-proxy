@@ -468,6 +468,7 @@ data BlockId
   | Portal
   | JackOLantern
   | Cake
+  | UnknownBlock Int8
      deriving (Show, Read, Eq)
 
 instance JavaBinary BlockId where
@@ -557,8 +558,9 @@ instance JavaBinary BlockId where
       0x5A -> return Portal
       0x5B -> return JackOLantern
       0x5C -> return Cake
-      _ -> error ("block id " ++ show tag)
+      _ -> return $ UnknownBlock tag
 
+  putJ (UnknownBlock tag)                = putJ (tag :: Int8)
   putJ Air                = putJ (0x00 :: Int8)
   putJ Stone              = putJ (0x01 :: Int8)
   putJ Grass              = putJ (0x02 :: Int8)

@@ -1,6 +1,7 @@
 module GameState where
 
 import Data.Array.IO
+import Control.Applicative
 import Control.Monad
 import Data.ByteString (ByteString)
 import qualified Data.ByteString as B
@@ -23,7 +24,7 @@ import JavaBinary
 
 type EntityMap = Map EntityId (Either String MobId, Int32, Int32, Int32)
 
-type BlockMap  = Map (Int32, Int32) (IOArray (Int8, Int8, Int8) BlockId)
+type BlockMap  = Map (Int32, Int32) (IOArray (Int8, Int8, Int8) BlockId, IOUArray (Int8, Int8, Int8) Word8)
 
 data GameState = GS
   { entityMap :: !EntityMap 
@@ -119,16 +120,25 @@ decomposeCoords x y z = ((x `shiftR` 4
                         )
 
 setChunk x y z sx sy sz bs ms bm = do
-  (arr,bm') <- case Map.lookup chunk bm of
-                 Nothing -> do arr <- newArray ((0,0,0),(0xf,0x7f,0xf)) Air
-                               return (arr, Map.insert chunk arr bm)
-                 Just arr -> return (arr, bm)
+  (blockArray,metaArray,bm') <- case Map.lookup chunk bm of
+                 Nothing -> do
+                   blockArray <- newArray ((0,0,0),(0xf,0x7f,0xf)) Air
+                   metaArray  <- newArray ((0,0,0),(0xf,0x7f,0xf)) (0 :: Word8)
+                   return (blockArray, metaArray, Map.insert chunk (blockArray, metaArray) bm)
+                 Just (blockArray, metaArray) -> return (blockArray, metaArray, bm)
   
-  zipWithM (writeArray arr) coords bs
+  zipWithM_ (writeArray blockArray) coords bs
+  zipWithM_ (writeMetaData metaArray) (pairs coords) (L.unpack ms)
   
   return bm'
   where
   (chunk,(bx,by,bz)) = decomposeCoords x (fromIntegral y) z
+  pairs (x:y:z) = (x,y) : pairs z
+  pairs _ = []
+
+  writeMetaData arr (x,y) m =  writeArray arr x (m `shiftR` 4)
+                            *> writeArray arr y (m .&. 0xf)
+
   coords = do x <- take (fromIntegral sx + 1) [bx ..]
               z <- take (fromIntegral sz + 1) [bz ..]
               y <- take (fromIntegral sy + 1) [by ..]
@@ -142,7 +152,10 @@ setBlocks x z changes bm = do
   return bm
 
   where
-  aux arr (coord, ty, meta) = writeArray arr (splitCoord coord) ty
+  aux (blockArray, metaArray) (coord, ty, meta) = let c = splitCoord coord
+                            in writeArray blockArray c ty
+                            *> writeArray metaArray c (fromIntegral meta)
+
   splitCoord :: Int16 -> (Int8, Int8, Int8)
   splitCoord c = (fromIntegral (c' `shiftR` 12), fromIntegral (c' .&. 0x7f), fromIntegral (c' `shiftR` 8 .&. 0xf))
    where c' :: Word16
@@ -152,7 +165,8 @@ setBlock :: Int32 -> Int8 -> Int32 -> BlockId -> Int8 -> BlockMap -> IO BlockMap
 setBlock x y z blockid meta bm = do
   case Map.lookup chunk bm of
     Nothing -> return ()
-    Just arr -> writeArray arr block blockid
+    Just (blockArray, metaArray) -> writeArray blockArray block blockid
+                                 *> writeArray metaArray  block (fromIntegral meta)
   return bm
   where
   (chunk,block) = decomposeCoords x (fromIntegral y) z

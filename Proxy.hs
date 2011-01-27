@@ -1,3 +1,4 @@
+{-# LANGUAGE RecordWildCards #-}
 module Main where
 
 import Protocol
@@ -28,6 +29,23 @@ import qualified Network
 import JavaBinary
 import GameState
 
+data ProxyState = PS
+  { gameState :: MVar GameState
+  , glassVar  :: IORef Bool
+  , lineVar   :: IORef (Bool, [Message])
+  , digVar    :: IORef Int
+  , followVar :: IORef (Maybe EntityId)
+  }
+
+newProxyState = do
+  gameState <- newMVar newGameState
+  glassVar  <- newIORef False
+  lineVar   <- newIORef (False, [])
+  digVar    <- newIORef 1
+  followVar <- newIORef Nothing
+  followVar <- newIORef Nothing
+  return PS {..}
+
 main :: IO ()
 main = do
   (host,port) <- do
@@ -43,39 +61,39 @@ main = do
   putStr "Got connection from "
   print csa
 
-  s <- socket AF_INET Stream defaultProtocol
-  ais <- getAddrInfo (Just defaultHints { addrFamily = AF_INET
-                                         , addrSocketType = Stream })
-                       (Just host) (Just port)
-  case ais of
-    (ai : _ ) -> do let sa = addrAddress ai
-                    print sa
-                    connect s sa
-                    proxy c s
-    _ -> fail "Unable to resolve server address"
+  do
+    s <- socket AF_INET Stream defaultProtocol
+    ais <- getAddrInfo (Just defaultHints { addrFamily = AF_INET
+                                           , addrSocketType = Stream })
+                         (Just host) (Just port)
+    case ais of
+      (ai : _ ) -> do let sa = addrAddress ai
+                      print sa
+                      connect s sa
+                      proxy c s
+      _ -> fail "Unable to resolve server address"
+    `Control.Exception.catch` \ (SomeException e) -> do
+      sendAll c $ encode $ Disconnect (show e)
+      fail (show e)
 
 proxy :: Socket -> Socket -> IO a
 proxy c s = do
   var <- newEmptyMVar
-  emap <- newMVar newGameState
-  glassvar <- newIORef False
-  digspeed <- newIORef False
-  follow <- newIORef Nothing
-  macro  <- newIORef (False, [])
-  chan <- newChan
-  schan <- newChan
+  state <- newProxyState
+  clientChan <- newChan
+  serverChan <- newChan
   _ <- forkIO $ do
           sbs <- getContents s
-          traverse_ (proxy1 chan (inboundLogic follow emap glassvar))
+          traverse_ (proxy1 clientChan (inboundLogic state))
                     (toMessages sbs)
          `bad` putMVar var "inbound"
-  _ <- forkIO $ forever (sendAll c =<< readChan chan )
+  _ <- forkIO $ forever (sendAll c =<< readChan clientChan)
                   `bad` putMVar var "inbound network" 
-  _ <- forkIO $ forever (sendAll s =<< readChan schan )
+  _ <- forkIO $ forever (sendAll s =<< readChan serverChan)
                  `bad` putMVar var "outbound network" 
   _ <- forkIO $ do
           cbs <- getContents c
-          traverse_ (proxy1 schan (outboundLogic chan follow emap glassvar digspeed macro))
+          traverse_ (proxy1 serverChan (outboundLogic clientChan state))
                     (toMessages cbs)
          `bad` putMVar var "outbound"
   who <- takeMVar var
@@ -85,12 +103,13 @@ proxy c s = do
   where
   bad m n = m `Control.Exception.catch` \ (SomeException e) -> print e >> n
 
-inboundLogic :: IORef (Maybe EntityId) ->
-                MVar GameState ->
-                IORef Bool ->
-                Message ->
-                IO [Message]
-inboundLogic follow emap glassvar msg = do
+makeGlass Dirt = Glass
+makeGlass Stone = Glass
+makeGlass Grass = Glass
+makeGlass block = block
+
+inboundLogic :: ProxyState -> Message -> IO [Message]
+inboundLogic state msg = do
   case msg of
     Entity {} -> return ()
     EntityLook {} -> return ()
@@ -104,93 +123,85 @@ inboundLogic follow emap glassvar msg = do
     Mapchunk {} -> return ()
     _ -> putStrLn $ "inbound: " ++ show msg
 
-  changedEid <- modifyMVar emap $ \ gs -> do
+  changedEid <- modifyMVar (gameState state) $ \ gs -> do
                        (change, gs') <- updateGameState msg gs
                        gs' `seq` return (gs', change)
 
-  glass <- readIORef glassvar
+  glass <- readIORef (glassVar state)
   let msg' = case msg of
                Mapchunk x y z sx sy sz bs a b c
                  | glass -> Mapchunk x y z sx sy sz (map makeGlass bs) a b c
                _ -> msg
-      makeGlass Dirt = Glass
-      makeGlass Stone = Glass
-      makeGlass Grass = Glass
-      makeGlass block = block
 
-  interested <- readIORef follow
+  interested <- readIORef $ followVar state
   case interested of
     Just ieid | interested == changedEid -> do
-     e <- entityMap <$> readMVar emap
+     e <- entityMap <$> readMVar (gameState state)
      case Map.lookup ieid e of
        Just (_ty, x, y, z) ->
          return [SpawnPosition (x `div` 32) (y `div` 32) (z `div` 32),msg']
        _ -> return [msg']
     _ -> return [msg']
 
-processCommand cchan follow emap glassvar digspeed _ "glass on"
-  =  writeIORef glassvar True
-  *> tellPlayer cchan "Glass On"
+
+processCommand :: Chan L.ByteString -> ProxyState -> String -> IO [Message]
+
+processCommand clientChan state "glass on"
+  =  writeIORef (glassVar state) True
+  *> tellPlayer clientChan "Glass On"
   *> return []
 
-processCommand cchan follow emap glassvar digspeed _ "glass off"
-  =  writeIORef glassvar False
-  *> tellPlayer cchan "Glass Off"
+processCommand clientChan state "glass off"
+  =  writeIORef (glassVar state) False
+  *> tellPlayer clientChan "Glass Off"
   *> return []
 
-processCommand cchan follow emap glassvar digspeed _ "dig on"
-  =  writeIORef digspeed True
-  *> tellPlayer cchan "Dig On"
-  *> return []
+processCommand clientChan state text | "dig " `isPrefixOf` text
+  =  case reads $ drop 4 text of
+       [(n,_)] -> writeIORef (digVar state) n
+               *> tellPlayer clientChan "Dig Set"
+               *> return []
 
-processCommand cchan follow emap glassvar digspeed _ "dig off"
-  =  writeIORef digspeed False
-  *> tellPlayer cchan "Dig Off"
-  *> return []
+       _       -> tellPlayer clientChan "Bad dig number"
+               *> return []
 
-processCommand cchan follow emap glassvar digspeed _ text
-  | "follow " `isPrefixOf` text
+processCommand clientChan state text | "follow " `isPrefixOf` text
   = case reads key of
-      [(eid, _)] -> do writeIORef follow $ Just $ EID eid
-                       tellPlayer cchan "Follow registered"
-      _ -> do e <- entityMap <$> readMVar emap
+      [(eid, _)] -> do writeIORef (followVar state) $ Just $ EID eid
+                       tellPlayer clientChan "Follow registered"
+      _ -> do e <- entityMap <$> readMVar (gameState state)
               case find (\ (_,(x,_,_,_)) -> x == Left key) (Map.assocs e) of
-                Just (k,_) -> writeIORef follow (Just k)
-                 *>  tellPlayer cchan "Follow registered"
-                Nothing -> tellPlayer cchan "Player not found"
+                Just (k,_) -> writeIORef (followVar state) (Just k)
+                 *>  tellPlayer clientChan "Follow registered"
+                Nothing -> tellPlayer clientChan "Player not found"
   *> return []
   where key = drop 7 text
 
-processCommand cchan follow emap glassvar digspeed macro "lines on"
-  =  writeIORef macro (True, [])
-  *> tellPlayer cchan "Lines On"
+processCommand clientChan state "lines on"
+  =  writeIORef (lineVar state) (True, [])
+  *> tellPlayer clientChan "Lines On"
   *> return []
 
-processCommand cchan follow emap glassvar digspeed macro "lines off"
-  =  do (_ , xs) <- readIORef macro
-        writeIORef macro (False, xs)
-        tellPlayer cchan "Lines Off"
-        return []
+processCommand clientChan state "lines off"
+  =  modifyIORef (lineVar state) (\ (_ , xs) -> (False, xs))
+  *> tellPlayer clientChan "Lines Off"
+  *> return []
 
 
 
-processCommand cchan follow emap glassvar _ _ _ = do
-  tellPlayer cchan "Command not understood"
-  return []
+processCommand clientChan _ _
+  =  tellPlayer clientChan "Command not understood"
+  *> return []
 
-tellPlayer cchan text = writeChan cchan $ encode $ Chat $ "\194\167\&6" ++ text
+tellPlayer chan text = writeChan chan $ encode $ Chat $ "\194\167\&6" ++ text
      
 outboundLogic :: Chan ByteString ->
-                 IORef (Maybe EntityId) ->
-                 MVar GameState ->
-                 IORef Bool ->
-                 IORef Bool ->
-                 IORef (Bool, [Message]) ->
+                 ProxyState ->
                  Message ->
                  IO [Message]
-outboundLogic cchan follow emap glassvar digspeed macro msg = do
+outboundLogic clientChan state msg = do
 
-  (recording, macros) <- readIORef macro
+  (recording, macros) <- readIORef $ lineVar state
 
   case msg of
     PlayerPosition {} -> return [msg]
@@ -199,33 +210,33 @@ outboundLogic cchan follow emap glassvar digspeed macro msg = do
     Player {} -> return [msg]
     KeepAliv -> return [msg]
     PlayerDigging Digging x y z face -> do
-     active <- readIORef digspeed
-     if active then return [msg,msg,msg,msg] else return [msg]
+     n <- readIORef $ digVar state
+     return $ replicate n msg
     PlayerBlockPlacement x y z _ (Just (IID 0x15B, _, _)) -> do
-      bm <- blockMap <$> readMVar emap
+      bm <- blockMap <$> readMVar (gameState state)
       let (chunkC,blockC) = decomposeCoords x (fromIntegral y) z
       case Map.lookup chunkC bm of
-        Just arr -> do
+        Just (arr,_) -> do
           blockId <- readArray arr blockC
           if (blockId /= Air) then do
-            tellPlayer cchan "Glass attack!"
+            tellPlayer clientChan "Glass attack!"
             glassMsgs <- mapM (makeGlassUpdate bm blockId) $ chunkedNearby (x, fromIntegral y, z)
             print glassMsgs
-            writeChan cchan $ runPut $ traverse_ putJ $ Prelude.concat glassMsgs
+            writeChan clientChan $ runPut $ traverse_ putJ $ Prelude.concat glassMsgs
             return []
            else return [msg]
          where
         _ -> return [msg]
     PlayerBlockPlacement x1 y1 z1 f o | recording -> case macros of
       [PlayerBlockPlacement x y z f o] -> do
-        writeIORef macro (recording, [msg])
+        writeIORef (lineVar state) (recording, [msg])
         if x == x1 && y == y1 then return [PlayerBlockPlacement x y z2 f o | z2 <- [min z z1 .. max z z1]]
          else if x == x1 && z == z1 then return [PlayerBlockPlacement x y2 z f o | y2 <- [min y y1 .. max y y1]]
          else if z == z1 && y == y1 then return [PlayerBlockPlacement x2 y z f o | x2 <- [min x x1 .. max x x1]]
          else return [msg]
                
-      _ -> do writeIORef macro (recording, [msg]) *> return [msg]
-    Chat ('\\':xs) -> processCommand cchan follow emap glassvar digspeed macro xs
+      _ -> do writeIORef (lineVar state) (recording, [msg]) *> return [msg]
+    Chat ('\\':xs) -> processCommand clientChan state xs
                 
     _ -> do putStrLn $ "outbound: " ++ show msg
             return [msg]
@@ -233,7 +244,7 @@ outboundLogic cchan follow emap glassvar digspeed macro msg = do
 lookupBlock bm chunkC blockC = do
   case Map.lookup chunkC bm of
     Nothing -> return Nothing
-    Just arr -> Just <$> readArray arr blockC
+    Just (arr,_) -> Just <$> readArray arr blockC
 
 makeGlassUpdate :: BlockMap -> BlockId -> ((Int32,Int32),[(Int8, Int8,Int8)]) -> IO [Message]
 makeGlassUpdate bm victim ((cx,cz), blocks) = do
