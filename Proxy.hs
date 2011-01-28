@@ -159,8 +159,12 @@ processCommand :: Chan L.ByteString -> ProxyState -> String -> IO [Message]
 processCommand clientChan state "restore glass"
   = do restoreMap <- swapMVar (restoreVar state) Map.empty
        bm <- blockMap <$> readMVar (gameState state)
-       tellPlayer clientChan "Restoring!"
-       writeChan clientChan . runPut . traverse_ putJ =<< makeRestore bm restoreMap
+       msgs <- makeRestore bm restoreMap
+       if null msgs then
+         tellPlayer clientChan "Nothing to restore"
+        else do 
+         writeChan clientChan . runPut . traverse_ putJ $ msgs
+         tellPlayer clientChan "Restoring!"
        return []
 
 processCommand clientChan state "glass on"
