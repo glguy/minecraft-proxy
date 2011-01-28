@@ -13,11 +13,14 @@ import qualified Data.ByteString.Lazy as L
 import Data.ByteString.Lazy (ByteString)
 import Data.Bits
 import Data.Foldable
+import Data.Traversable (for)
 import Data.IORef
 import Data.Array.IO
 import Data.Int
 import Data.Word
 import Data.Map (Map)
+import Data.Maybe (fromMaybe,catMaybes)
+import Data.Set (Set)
 import Data.List (groupBy,sort,isPrefixOf)
 import Network.Socket hiding (send)
 import Network.Socket.ByteString.Lazy
@@ -25,6 +28,7 @@ import Prelude hiding (getContents)
 import System.Environment
 import System.Exit
 import qualified Data.Map as Map
+import qualified Data.Set as Set
 import qualified Network
 import JavaBinary
 import GameState
@@ -32,17 +36,19 @@ import GameState
 data ProxyState = PS
   { gameState :: MVar GameState
   , glassVar  :: IORef Bool
+  , restoreVar :: MVar (Map (Int32,Int32) (Set (Int8, Int8, Int8)))
   , lineVar   :: IORef (Bool, [Message])
   , digVar    :: IORef Int
   , followVar :: MVar (Maybe EntityId)
   }
 
 newProxyState = do
-  gameState <- newMVar newGameState
-  glassVar  <- newIORef False
-  lineVar   <- newIORef (False, [])
-  digVar    <- newIORef 1
-  followVar <- newMVar Nothing
+  gameState  <- newMVar newGameState
+  glassVar   <- newIORef False
+  restoreVar <- newMVar Map.empty
+  lineVar    <- newIORef (False, [])
+  digVar     <- newIORef 1
+  followVar  <- newMVar Nothing
   return PS {..}
 
 main :: IO ()
@@ -150,6 +156,13 @@ inboundLogic state msg = do
 
 processCommand :: Chan L.ByteString -> ProxyState -> String -> IO [Message]
 
+processCommand clientChan state "restore glass"
+  = do restoreMap <- swapMVar (restoreVar state) Map.empty
+       bm <- blockMap <$> readMVar (gameState state)
+       tellPlayer clientChan "Restoring!"
+       writeChan clientChan . runPut . traverse_ putJ =<< makeRestore bm restoreMap
+       return []
+
 processCommand clientChan state "glass on"
   =  writeIORef (glassVar state) True
   *> tellPlayer clientChan "Glass On"
@@ -234,9 +247,14 @@ outboundLogic clientChan state msg = do
           blockId <- readArray arr blockC
           if (blockId /= Air) then do
             tellPlayer clientChan "Glass attack!"
-            glassMsgs <- mapM (makeGlassUpdate bm blockId) $ chunkedNearby (x, fromIntegral y, z)
+            let coords = chunkedNearby (x, fromIntegral y, z)
+            coords' <- filter (not . null . snd) <$> mapM (filterGlassUpdate bm blockId) coords
+            glassMsgs <- mapM (makeGlassUpdate bm blockId) coords'
             print glassMsgs
             writeChan clientChan $ runPut $ traverse_ putJ $ Prelude.concat glassMsgs
+            modifyMVar_ (restoreVar state) $ \ m -> 
+              let m' = foldl' (\ m (chunk,blocks) -> Map.alter (Just . Set.union (Set.fromList blocks) . fromMaybe Set.empty) chunk m) m coords'
+              in return $! m'
             return []
            else return [msg]
          where
@@ -260,13 +278,37 @@ lookupBlock bm chunkC blockC = do
     Nothing -> return Nothing
     Just (arr,_) -> Just <$> readArray arr blockC
 
+lookupBlock' bm chunkC blockC = do
+  case Map.lookup chunkC bm of
+    Nothing -> return Nothing
+    Just (blockArray,metaArray) -> do
+      x <- readArray blockArray blockC
+      y <- readArray metaArray blockC
+      return (Just (x,y))
+
+filterGlassUpdate bm victim ((cx,cz), blocks) = do
+  xs <- filterM ( \ c -> (== Just victim) <$> lookupBlock bm (cx,cz) c  ) blocks
+  return ((cx,cz),xs)
+
 makeGlassUpdate :: BlockMap -> BlockId -> ((Int32,Int32),[(Int8, Int8,Int8)]) -> IO [Message]
-makeGlassUpdate bm victim ((cx,cz), blocks) = do
-  coords <- filterM ( \ c -> (== Just victim) <$> lookupBlock bm (cx,cz) c  ) blocks
+makeGlassUpdate bm victim ((cx,cz), coords) =
   if null coords then return []
    else return [MultiblockChange cx cz [(packCoords' c, Glass, 0) | c <- coords]]
-  where
-  packCoords' (x,y,z) = fromIntegral (fromIntegral x `shiftL` 12
+
+makeRestore :: BlockMap -> Map (Int32,Int32) (Set (Int8,Int8,Int8)) -> IO [Message]
+makeRestore bm restoreMap = do
+ catMaybes <$> for (Map.toList restoreMap) (\ (chunk, blocks) ->
+                     for (Map.lookup chunk bm)   (\ (blockArray, metaArray) ->
+                     fmap ( \ xs -> MultiblockChange (fst chunk) (snd chunk) [ (packCoords' c, ty, fromIntegral met) | (c,ty,met) <- xs])   (
+                     for (Set.toList blocks)     (\ block -> do
+                       x <- readArray blockArray block
+                       y <- readArray metaArray block
+                       return (block,x,y)))))
+ 
+                     
+ 
+
+packCoords' (x,y,z) = fromIntegral (fromIntegral x `shiftL` 12
                                       .|. fromIntegral z `shiftL` 8
                                       .|. fromIntegral y :: Word16)
  

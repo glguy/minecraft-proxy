@@ -136,8 +136,8 @@ setChunk x y z sx sy sz bs ms bm = do
   pairs (x:y:z) = (x,y) : pairs z
   pairs _ = []
 
-  writeMetaData arr (x,y) m =  writeArray arr x (m `shiftR` 4)
-                            *> writeArray arr y (m .&. 0xf)
+  writeMetaData arr (x,y) m =  writeArray arr y (m `shiftR` 4)
+                            *> writeArray arr x (m .&. 0xf)
 
   coords = do x <- take (fromIntegral sx + 1) [bx ..]
               z <- take (fromIntegral sz + 1) [bz ..]
