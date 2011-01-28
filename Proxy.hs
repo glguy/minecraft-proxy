@@ -34,7 +34,7 @@ data ProxyState = PS
   , glassVar  :: IORef Bool
   , lineVar   :: IORef (Bool, [Message])
   , digVar    :: IORef Int
-  , followVar :: IORef (Maybe EntityId)
+  , followVar :: MVar (Maybe EntityId)
   }
 
 newProxyState = do
@@ -42,8 +42,7 @@ newProxyState = do
   glassVar  <- newIORef False
   lineVar   <- newIORef (False, [])
   digVar    <- newIORef 1
-  followVar <- newIORef Nothing
-  followVar <- newIORef Nothing
+  followVar <- newMVar Nothing
   return PS {..}
 
 main :: IO ()
@@ -55,24 +54,27 @@ main = do
       _ -> do putStrLn "Usage: minecraft-proxy host port"
               exitFailure
 
-  l <- Network.listenOn (Network.PortNumber (fromInteger 25564))
+  l <- Network.listenOn (Network.PortNumber (fromInteger 25565))
   putStrLn "Ready"
-  (c, csa) <- accept l
+  forever $ do res <- accept l
+               _ <- forkIO (handleClient host port res)
+               return ()
+
+handleClient host port (c,csa) = do
   putStr "Got connection from "
   print csa
 
-  do
-    s <- socket AF_INET Stream defaultProtocol
-    ais <- getAddrInfo (Just defaultHints { addrFamily = AF_INET
-                                           , addrSocketType = Stream })
-                         (Just host) (Just port)
-    case ais of
-      (ai : _ ) -> do let sa = addrAddress ai
-                      print sa
-                      connect s sa
-                      proxy c s
-      _ -> fail "Unable to resolve server address"
-    `Control.Exception.catch` \ (SomeException e) -> do
+  s <- socket AF_INET Stream defaultProtocol
+  ais <- getAddrInfo (Just defaultHints { addrFamily = AF_INET
+                                         , addrSocketType = Stream })
+                       (Just host) (Just port)
+  case ais of
+    (ai : _ ) -> do let sa = addrAddress ai
+                    print sa
+                    connect s sa
+                    proxy c s
+    _ -> fail "Unable to resolve server address"
+ `Control.Exception.catch` \ (SomeException e) -> do
       sendAll c $ encode $ Disconnect (show e)
       fail (show e)
 
@@ -121,6 +123,8 @@ inboundLogic state msg = do
     Prechunk{} -> return ()
     TimeUpdate {} -> return ()
     Mapchunk {} -> return ()
+    BlockChange {} -> return ()
+    MultiblockChange {} -> return ()
     _ -> putStrLn $ "inbound: " ++ show msg
 
   changedEid <- modifyMVar (gameState state) $ \ gs -> do
@@ -133,15 +137,15 @@ inboundLogic state msg = do
                  | glass -> Mapchunk x y z sx sy sz (map makeGlass bs) a b c
                _ -> msg
 
-  interested <- readIORef $ followVar state
-  case interested of
-    Just ieid | interested == changedEid -> do
-     e <- entityMap <$> readMVar (gameState state)
-     case Map.lookup ieid e of
-       Just (_ty, x, y, z) ->
-         return [SpawnPosition (x `div` 32) (y `div` 32) (z `div` 32),msg']
-       _ -> return [msg']
-    _ -> return [msg']
+  withMVar (followVar state) $ \ interested ->
+    case interested of
+      Just ieid | interested == changedEid -> do
+       e <- entityMap <$> readMVar (gameState state)
+       case Map.lookup ieid e of
+         Just (_ty, x, y, z) ->
+           return [SpawnPosition (x `div` 32) (y `div` 32) (z `div` 32),msg']
+         _ -> return [msg']
+      _ -> return [msg']
 
 
 processCommand :: Chan L.ByteString -> ProxyState -> String -> IO [Message]
@@ -165,13 +169,23 @@ processCommand clientChan state text | "dig " `isPrefixOf` text
        _       -> tellPlayer clientChan "Bad dig number"
                *> return []
 
+processCommand clientChan state "follow off" = do
+  modifyMVar_ (followVar state) $ \ _ -> do
+    mb <- spawnLocation <$> readMVar (gameState state)
+    case mb of
+      Nothing      -> tellPlayer clientChan "Follow disabled - spawn point unknown"
+      Just (x,y,z) -> do writeChan clientChan $ encode $ SpawnPosition x y z
+                         tellPlayer clientChan "Follow disabled - compass restored"
+    return Nothing
+  return []
+
 processCommand clientChan state text | "follow " `isPrefixOf` text
   = case reads key of
-      [(eid, _)] -> do writeIORef (followVar state) $ Just $ EID eid
+      [(eid, _)] -> do swapMVar (followVar state) $ Just $ EID eid
                        tellPlayer clientChan "Follow registered"
       _ -> do e <- entityMap <$> readMVar (gameState state)
               case find (\ (_,(x,_,_,_)) -> x == Left key) (Map.assocs e) of
-                Just (k,_) -> writeIORef (followVar state) (Just k)
+                Just (k,_) -> swapMVar (followVar state) (Just k)
                  *>  tellPlayer clientChan "Follow registered"
                 Nothing -> tellPlayer clientChan "Player not found"
   *> return []
