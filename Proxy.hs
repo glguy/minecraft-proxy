@@ -129,7 +129,10 @@ inboundLogic ::
   IO ()
 inboundLogic clientChan state msg = do
   case msg of
-    PlayNote {} -> print msg
+    EntityMetadata {} -> print msg
+    EntityEquipment {} -> print msg
+    UseEntity {} -> print msg
+    EntityStatus {} -> print msg
     _ -> return ()
 
   -- Track entities

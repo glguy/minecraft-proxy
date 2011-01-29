@@ -2,22 +2,21 @@
 {-# LANGUAGE GeneralizedNewtypeDeriving #-}
 module Protocol where
 
--- import Codec.Compression.Zlib
 import Codec.Compression.Zlib
-import qualified Codec.Compression.Zlib.Internal as ZI
 import Control.Applicative
 import Control.Monad
 import Data.Binary.Get
 import Data.Binary.Put
 import Data.Bits
+import Data.ByteString.Lazy (ByteString)
 import Data.Foldable
 import Data.Int
-import Data.Traversable
 import Debug.Trace
-import JavaBinary
+import qualified Codec.Compression.Zlib.Internal as ZI
 import qualified Data.ByteString.Lazy as L
 import qualified Data.ByteString.Lazy.Internal as LI
-import Data.ByteString.Lazy (ByteString)
+
+import JavaBinary
 
 type MessageTag = Int8
 
@@ -656,7 +655,7 @@ instance JavaBinary BlockId where
   putJ Cake               = putJ (0x5C :: Int8)
   putJ (UnknownBlock tag) = putJ (tag :: Int8)
 
-data Metadata = Metadata [MetadataEntry]
+data Metadata = Metadata [(Int8, MetadataEntry)]
  deriving (Show, Read)
 
 data MetadataEntry
@@ -670,25 +669,31 @@ data MetadataEntry
 
 instance JavaBinary Metadata where
   getJ = Metadata <$> aux
-    where aux = do
-            tag <- getJ :: Get Int8
-            if tag == 127 then return []
-             else (:) <$> case tag `shiftR` 5 of
-                            0 -> MetadataByte   <$> getJ
-                            1 -> MetadataShort  <$> getJ
-                            2 -> MetadataInt    <$> getJ
-                            3 -> MetadataFloat  <$> getJ
-                            4 -> MetadataString <$> getJ
-                            5 -> MetadataTriple <$> getJ
-                            _ -> error $ "Unknown metadata tag " ++ show tag
-                      <*> aux
-  putJ (Metadata xs) = traverse aux xs *> putJ (127 :: Int8)
-    where aux (MetadataByte   x) = putJ (0 :: Int8) *> putJ x
-          aux (MetadataShort  x) = putJ (1 :: Int8) *> putJ x
-          aux (MetadataInt    x) = putJ (2 :: Int8) *> putJ x
-          aux (MetadataFloat  x) = putJ (3 :: Int8) *> putJ x
-          aux (MetadataString x) = putJ (4 :: Int8) *> putJ x
-          aux (MetadataTriple x) = putJ (5 :: Int8) *> putJ x
+    where
+    aux =
+     do tag <- getJ :: Get Int8
+        if tag == 127 then return []
+         else do
+          let ix = tag .&. 0x1f
+          x <- case tag `shiftR` 5 of
+                 0 -> MetadataByte   <$> getJ
+                 1 -> MetadataShort  <$> getJ
+                 2 -> MetadataInt    <$> getJ
+                 3 -> MetadataFloat  <$> getJ
+                 4 -> MetadataString <$> getJ
+                 5 -> MetadataTriple <$> getJ
+                 _ -> error $ "Unknown metadata tag " ++ show tag
+          xs <- aux
+          return ((ix,x) : xs)
+
+  putJ (Metadata xs) = traverse_ aux xs *> putJ (127 :: Int8)
+    where putTag fieldType ix = putJ (fieldType `shiftL` 5 .|. ix .&. 0x1f)
+          aux (ix, MetadataByte   x) = putTag 0 ix *> putJ x
+          aux (ix, MetadataShort  x) = putTag 1 ix *> putJ x
+          aux (ix, MetadataInt    x) = putTag 2 ix *> putJ x
+          aux (ix, MetadataFloat  x) = putTag 3 ix *> putJ x
+          aux (ix, MetadataString x) = putTag 4 ix *> putJ x
+          aux (ix, MetadataTriple x) = putTag 5 ix *> putJ x
 
 data Action
   = ActionCrouch
