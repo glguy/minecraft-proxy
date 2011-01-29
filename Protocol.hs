@@ -852,7 +852,7 @@ getMessage = do
                len <- getJ :: Get Int32
                compressed <- getLazyByteString (fromIntegral len)
                return $ case safeDecompress compressed of
-                 Left errorMsg -> proxyChat "Bad chunk, attempting to continue"
+                 Left _ -> proxyChat "Bad chunk, attempting to continue"
                  Right uncompressed ->
                   let parser = Mapchunk x y z sx sy sz
                            <$> replicateM (fromIntegral block_count) getJ

@@ -13,9 +13,9 @@ import Data.ByteString.Lazy (ByteString)
 import Data.Foldable
 import Data.IORef
 import Data.Int
-import Data.List (groupBy,sort,isPrefixOf)
+import Data.List (isPrefixOf)
 import Data.Map (Map)
-import Data.Maybe (fromMaybe,catMaybes,mapMaybe)
+import Data.Maybe (fromMaybe,mapMaybe)
 import Data.Set (Set)
 import Data.Traversable (for)
 import Data.Word
@@ -36,15 +36,18 @@ import Protocol
 data ProxyState = PS
   { gameState :: MVar GameState
   , glassVar  :: IORef Bool
+  , digThrough :: IORef Int
   , restoreVar :: MVar (Map (Int32,Int32) (Set (Int8, Int8, Int8)))
   , lineVar   :: IORef (Bool, [Message])
   , digVar    :: IORef Int
   , followVar :: MVar (Maybe EntityId)
   }
 
+newProxyState :: IO ProxyState
 newProxyState = do
   gameState  <- newMVar newGameState
   glassVar   <- newIORef False
+  digThrough <- newIORef 0
   restoreVar <- newMVar Map.empty
   lineVar    <- newIORef (False, [])
   digVar     <- newIORef 1
@@ -65,7 +68,7 @@ main = do
   forever $ do res <- accept l
                _ <- forkIO (handleClient host port res)
                return ()
-
+handleClient :: HostName -> ServiceName -> (Socket, SockAddr) -> IO ()
 handleClient host port (c,csa) = do
   putStr "Got connection from "
   print csa
@@ -113,10 +116,11 @@ proxy c s = do
   where
   bad m n = m `Control.Exception.catch` \ (SomeException e) -> print e >> n
 
+makeGlass :: BlockId -> BlockId
 makeGlass Dirt  = Glass
 makeGlass Stone = Glass
 makeGlass Grass = Glass
-makeGlass block = block
+makeGlass other = other
 
 inboundLogic ::
   Chan ByteString {- ^ client channel -} ->
@@ -175,6 +179,12 @@ processCommand clientChan state "glass off"
   =  writeIORef (glassVar state) False
   *> tellPlayer clientChan "Glass Off"
 
+processCommand clientChan state text | "through " `isPrefixOf` text
+  =  case reads $ drop 8 text of
+       [(n,_)] -> writeIORef (digThrough state) n
+               *> tellPlayer clientChan "Through Set"
+       _ -> tellPlayer clientChan "Bad through value"
+
 processCommand clientChan state text | "dig " `isPrefixOf` text
   =  case reads $ drop 4 text of
        [(n,_)] -> writeIORef (digVar state) n
@@ -226,6 +236,7 @@ outboundLogic :: Chan ByteString {- ^ client channel -} ->
 outboundLogic clientChan serverChan state msg = do
 
   (recording, macros) <- readIORef $ lineVar state
+  shiftCount <- readIORef (digThrough state)
 
   msgs <- case msg of
     PlayerPosition {} -> return [msg]
@@ -233,37 +244,43 @@ outboundLogic clientChan serverChan state msg = do
     PlayerLook {} -> return [msg]
     Player {} -> return [msg]
     KeepAliv -> return [msg]
+
     PlayerDigging Digging x y z face -> do
+     let (x',y',z') = digShift x y z face shiftCount
      n <- readIORef $ digVar state
-     return $ replicate n msg
+     return $ replicate n $ PlayerDigging Digging x' y' z' face
+
+    PlayerDigging action x y z face -> do
+     let (x',y',z') = digShift x y z face shiftCount
+     return [PlayerDigging action x' y' z' face]
+
     PlayerBlockPlacement x y z _ (Just (IID 0x15B, _, _)) -> do
-      bm <- blockMap <$> readMVar (gameState state)
-      attacked <- glassAttack clientChan state bm x y z
-      if attacked then return [] else return [msg]
+      attacked <- glassAttack clientChan state x y z
+      return $ if attacked then [] else [msg]
 
     PlayerBlockPlacement x1 y1 z1 f o | recording -> case macros of
-      [PlayerBlockPlacement x y z f o] -> do
-        writeIORef (lineVar state) (recording, [msg])
-        return $ drawLine msg x y z x1 y1 z1 f o
-               
-      _ -> do writeIORef (lineVar state) (recording, [msg]) *> return [msg]
-    Chat ('\\':xs) -> processCommand clientChan state xs *> return []
+      [PlayerBlockPlacement x y z _ _] ->
+        do writeIORef (lineVar state) (recording, [msg])
+           return $ drawLine msg x y z x1 y1 z1 f o
+
+      _ -> [msg] <$ writeIORef (lineVar state) (recording, [msg])
+
+    Chat ('\\':xs) -> [] <$ processCommand clientChan state xs
                 
-    _ -> do putStrLn $ "outbound: " ++ show msg
-            return [msg]
+    _ -> [msg] <$ putStrLn ("outbound: " ++ show msg)
   sendMessages serverChan msgs
 
 glassAttack ::
   Chan ByteString {- ^ client channel -} ->
   ProxyState                             ->
-  BlockMap                               ->
   Int32 {- ^ X block coordinate -}       ->
   Int8  {- ^ Y block coordinate -}       ->
   Int32 {- ^ Z block coordinate -}       ->
   IO Bool
-glassAttack clientChan state bm x y z =
+glassAttack clientChan state x y z = do
+   bm <- blockMap <$> readMVar (gameState state)
    let (chunkC,blockC) = decomposeCoords x y z
-   in case Map.lookup chunkC bm of
+   case Map.lookup chunkC bm of
         Just (arr,_) -> do
           blockId <- readArray arr blockC
           if (blockId /= Air) then do
@@ -290,16 +307,30 @@ mergeCoords = foldl' $ \ m (chunk,blocks) ->
           . fromMaybe Set.empty
   in if null blocks then m else Map.alter aux chunk m
 
+drawLine :: Message ->
+  Int32 {- ^ First X -} ->
+  Int8 {- ^ First Y -} ->
+  Int32 {- ^ First Z -} ->
+  Int32 {- ^ Second X -} ->
+  Int8 {- ^ Second Y -} ->
+  Int32 {- ^ Second Z -} ->
+  Face ->
+  Maybe (ItemId, Int8, Int16) {- ^ Hand contents -} ->
+  [Message]
 drawLine msg x y z x1 y1 z1 f o
   | x == x1 && y == y1 = [PlayerBlockPlacement x y z2 f o | z2 <- [min z z1 .. max z z1]]
   | x == x1 && z == z1 = [PlayerBlockPlacement x y2 z f o | y2 <- [min y y1 .. max y y1]]
   | z == z1 && y == y1 = [PlayerBlockPlacement x2 y z f o | x2 <- [min x x1 .. max x x1]]
   | otherwise          = [msg]
 
+lookupBlock ::
+  BlockMap ->
+  ChunkLoc ->
+  BlockLoc ->
+  IO (Maybe BlockId)
 lookupBlock bm chunkC blockC = do
-  case Map.lookup chunkC bm of
-    Nothing -> return Nothing
-    Just (arr,_) -> Just <$> readArray arr blockC
+  for (Map.lookup chunkC bm) $ \ (blockArray, _) ->
+    readArray blockArray blockC
 
 filterGlassUpdate :: BlockMap -> BlockId -> (ChunkLoc, [BlockLoc]) -> IO (ChunkLoc, [BlockLoc])
 filterGlassUpdate bm victim ((cx,cz), blocks) = do
@@ -320,10 +351,10 @@ makeRestore bm = sequence . mapMaybe toMessage . Map.toList
     = do guard (not (Set.null blocks))
          (blockArray, metaArray) <- Map.lookup chunk bm
          return $ fmap (MultiblockChange cx cz)
-                $ for (Set.toList blocks) $ \ block ->
-                    do blockType <- readArray blockArray block
-                       blockMeta <- readArray metaArray  block
-                       return (packCoords block, blockType, fromIntegral blockMeta)
+                $ for (Set.toList blocks) $ \ b ->
+                    do blockType <- readArray blockArray b
+                       blockMeta <- readArray metaArray  b
+                       return (packCoords b, blockType, fromIntegral blockMeta)
                      
  
 -- | 'packCoords' packs coordinates local to a chunk into a single
@@ -342,9 +373,22 @@ collect :: Ord a => [(a,b)] -> [(a, [b])]
 collect = Map.toList . Map.fromListWith (++) . map (\ (a,b) -> (a,[b]))
 
 nearby :: (Int32,Int8,Int32) -> [(Int32,Int8,Int32)]
-nearby (x,y,z) = filter inRange box
+nearby (x,y,z) = filter inSphere box
   where radius :: Num a => a
         radius = 10
-        inRange (x1,y1,z1) = squared radius > (squared (x1-x) + fromIntegral (squared (y1-y)) + squared (z1-z))
-        squared x = x * x
+        inSphere (x1,y1,z1) = squared radius > (squared (x1-x) + fromIntegral (squared (y1-y)) + squared (z1-z))
+        squared i = i * i
         box = (,,) <$> [x-radius .. x+radius] <*> [y-radius .. y+radius] <*> [z-radius .. z+radius]
+
+digShift :: Int32 -> Int8 -> Int32 -> Face -> Int -> (Int32, Int8, Int32)
+digShift x y z face i = case face of
+  X1 -> (x+i',y,z)
+  X2 -> (x-i',y,z)
+  Y1 -> (x,y+i',z)
+  Y2 -> (x,y-i',z)
+  Z1 -> (x,y,z+i')
+  Z2 -> (x,y,z-i')
+  None -> (x,y,z)
+
+ where i' :: Num a => a
+       i' = fromIntegral i
