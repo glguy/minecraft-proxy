@@ -148,9 +148,11 @@ setChunk x y z sx sy sz bs ms bm = do
   writeMetaData arr (x1,x2) m =  writeArray arr x2 (m `shiftR` 4)
                               *> writeArray arr x1 (m .&. 0xf)
 
-  coords = (,,) <$> take (fromIntegral sx + 1) [bx ..]
-                <*> take (fromIntegral sz + 1) [bz ..]
-                <*> take (fromIntegral sy + 1) [by ..]
+  coords = do -- The x z y order is intentional
+              x <- take (fromIntegral sx + 1) [bx ..]
+              z <- take (fromIntegral sz + 1) [bz ..]
+              y <- take (fromIntegral sy + 1) [by ..]
+              return (x,y,z)
 
 -- | 'setBlocks' updates a number of blocks within a single chunk.
 setBlocks ::
