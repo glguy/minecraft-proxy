@@ -194,7 +194,7 @@ data Message
                    Int8  --  Pitch
 
   | EntityStatus EntityId
-                 Int8 --  Status
+                 EntityStatus
 
   | AttachEntity EntityId --  Entity ID
                  EntityId --  Vehicle ID
@@ -211,7 +211,7 @@ data Message
              Int8  --  X length
              Int8  --  Y length
              Int8  --  Z length
-             [BlockId] 
+             [BlockId]
              ByteString
              ByteString
              ByteString
@@ -290,6 +290,24 @@ instance JavaBinary Message where
   getJ = getMessage
   putJ = putMessage
 
+data EntityStatus
+  = Damaged
+  | Died
+  | OtherStatus Int8
+  deriving (Read, Show, Eq)
+
+instance JavaBinary EntityStatus where
+  getJ = do
+    tag <- getJ
+    return $! case tag of
+      2 -> Damaged
+      3 -> Died
+      _ -> trace ("Unknown status " ++ show tag) (OtherStatus tag)
+
+  putJ Damaged = putJ (2 :: Int8)
+  putJ Died = putJ (3 :: Int8)
+  putJ (OtherStatus tag) = putJ tag
+
 data InstrumentType
   = Harp
   | DoubleBass
@@ -363,21 +381,21 @@ instance JavaBinary MobId where
 
   getJ = do
     tag <- getJ
-    case tag of 
-      50 -> return Creeper
-      51 -> return Skeleton
-      52 -> return Spider
-      53 -> return GiantSpider
-      54 -> return Zombie
-      55 -> return Slime
-      56 -> return Ghast
-      57 -> return ZombiePigman
-      90 -> return Pig
-      91 -> return Sheep
-      92 -> return Cow
-      93 -> return Hen
-      94 -> return Squid
-      _  -> trace ("Unknown mob " ++ show tag) (return $ OtherMob tag)
+    return $! case tag of
+      50 -> Creeper
+      51 -> Skeleton
+      52 -> Spider
+      53 -> GiantSpider
+      54 -> Zombie
+      55 -> Slime
+      56 -> Ghast
+      57 -> ZombiePigman
+      90 -> Pig
+      91 -> Sheep
+      92 -> Cow
+      93 -> Hen
+      94 -> Squid
+      _  -> trace ("Unknown mob " ++ show tag) (OtherMob tag)
   putJ Creeper        = putJ (50 :: Int8)
   putJ Skeleton       = putJ (51 :: Int8)
   putJ Spider         = putJ (52 :: Int8)
@@ -568,7 +586,7 @@ instance JavaBinary BlockId where
       0x5A -> Portal
       0x5B -> JackOLantern
       0x5C -> Cake
-      _ -> trace ("Unknown block " ++ show tag) (UnknownBlock tag) 
+      _ -> trace ("Unknown block " ++ show tag) (UnknownBlock tag)
 
   putJ Air                = putJ (0x00 :: Int8)
   putJ Stone              = putJ (0x01 :: Int8)
@@ -865,7 +883,7 @@ getMessage = do
                            <*> getLazyByteString (block_count `div` 2)
                            <*> getLazyByteString (block_count `div` 2)
                   in runGet parser uncompressed
-               
+
     0x34 -> MultiblockChange <$> getJ <*> getJ <*> changes
       where changes = do
               sz <- getJ :: Get Int16
@@ -939,7 +957,7 @@ putMessage Respawn = putJ (0x09 :: MessageTag)
 putMessage (Player ground) = do
   putJ (0x0a :: MessageTag)
   putJ ground
-  
+
 putMessage (PlayerPosition x y stance z ground) = do
   putJ (0x0b :: MessageTag)
   putJ x
@@ -1169,14 +1187,14 @@ putMessage (Explosion x y z r xs) = do
   putJ r
   putWord32be (fromIntegral (length xs))
   traverse_ putJ xs
-  
+
 putMessage (OpenWindow wid ty title slots) = do
   putJ (0x64 :: MessageTag)
   putJ wid
   putJ ty
   putJ title
   putJ slots
-  
+
 putMessage (CloseWindow wid) = do
   putJ (0x65 :: MessageTag)
   putJ wid

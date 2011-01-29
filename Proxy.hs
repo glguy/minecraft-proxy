@@ -128,12 +128,6 @@ inboundLogic ::
   Message                                ->
   IO ()
 inboundLogic clientChan state msg = do
-  case msg of
-    EntityMetadata {} -> print msg
-    EntityEquipment {} -> print msg
-    UseEntity {} -> print msg
-    EntityStatus {} -> print msg
-    _ -> return ()
 
   -- Track entities
   changedEid <- modifyMVar (gameState state) $ \ gs -> do
