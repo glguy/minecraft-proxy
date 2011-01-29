@@ -286,7 +286,7 @@ glassAttack clientChan state x y z = do
           if (blockId /= Air) then do
             tellPlayer clientChan "Glass attack!"
 
-            let coords = chunkedCoords $ nearby (x, y, z)
+            let coords = chunkedCoords $ nearby x y z
             coords' <- mapM (filterGlassUpdate bm blockId) coords
             let glassMsgs = makeGlassUpdate =<< coords'
             sendMessages clientChan glassMsgs
@@ -309,10 +309,10 @@ mergeCoords = foldl' $ \ m (chunk,blocks) ->
 
 drawLine :: Message ->
   Int32 {- ^ First X -} ->
-  Int8 {- ^ First Y -} ->
+  Int8  {- ^ First Y -} ->
   Int32 {- ^ First Z -} ->
   Int32 {- ^ Second X -} ->
-  Int8 {- ^ Second Y -} ->
+  Int8  {- ^ Second Y -} ->
   Int32 {- ^ Second Z -} ->
   Face ->
   Maybe (ItemId, Int8, Int16) {- ^ Hand contents -} ->
@@ -323,11 +323,7 @@ drawLine msg x y z x1 y1 z1 f o
   | z == z1 && y == y1 = [PlayerBlockPlacement x2 y z f o | x2 <- [min x x1 .. max x x1]]
   | otherwise          = [msg]
 
-lookupBlock ::
-  BlockMap ->
-  ChunkLoc ->
-  BlockLoc ->
-  IO (Maybe BlockId)
+lookupBlock :: BlockMap -> ChunkLoc -> BlockLoc -> IO (Maybe BlockId)
 lookupBlock bm chunkC blockC = do
   for (Map.lookup chunkC bm) $ \ (blockArray, _) ->
     readArray blockArray blockC
@@ -372,8 +368,14 @@ chunkedCoords = collect . map categorize
 collect :: Ord a => [(a,b)] -> [(a, [b])]
 collect = Map.toList . Map.fromListWith (++) . map (\ (a,b) -> (a,[b]))
 
-nearby :: (Int32,Int8,Int32) -> [(Int32,Int8,Int32)]
-nearby (x,y,z) = filter inSphere box
+-- | 'nearby' computes the coordinates of blocks that are within 10
+-- blocks of the given coordinate.
+nearby ::
+  Int32 {- ^ X coordinate -} ->
+  Int8  {- ^ Y coordinate -} ->
+  Int32 {- ^ Z coordinate -} ->
+  [(Int32,Int8,Int32)]
+nearby x y z = filter inSphere box
   where radius :: Num a => a
         radius = 10
         inSphere (x1,y1,z1) = squared radius > (squared (x1-x) + fromIntegral (squared (y1-y)) + squared (z1-z))
