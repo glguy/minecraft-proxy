@@ -128,6 +128,9 @@ inboundLogic ::
   Message                                ->
   IO ()
 inboundLogic clientChan state msg = do
+  case msg of
+    PlayNote {} -> print msg
+    _ -> return ()
 
   -- Track entities
   changedEid <- modifyMVar (gameState state) $ \ gs -> do
@@ -160,6 +163,13 @@ processCommand ::
   ProxyState                             ->
   String          {- ^ chat command   -} ->
   IO ()
+
+
+processCommand clientChan state text
+  | "echo " `isPrefixOf` text
+  = case reads (drop 5 text) of
+      [(msg,_)] -> sendMessages clientChan [msg]
+      _ -> tellPlayer clientChan "Unable to parse message"
 
 processCommand clientChan state "restore"
   = do restoreMap <- swapMVar (restoreVar state) Map.empty

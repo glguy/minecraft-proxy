@@ -292,11 +292,11 @@ instance JavaBinary Message where
   putJ = putMessage
 
 data InstrumentType
-  = DoubleBass
+  = Harp
+  | DoubleBass
   | SnareDrum
   | Sticks
   | BassDrum
-  | Harp
   | OtherInstrument Int8
   deriving (Show, Read)
 
@@ -304,18 +304,18 @@ instance JavaBinary InstrumentType where
   getJ = do
     tag <- getJ
     return $! case tag of
+      0 -> Harp
       1 -> DoubleBass
       2 -> SnareDrum
       3 -> Sticks
       4 -> BassDrum
-      5 -> Harp
       _ -> trace ("Unknown instrument " ++ show tag) (OtherInstrument tag)
 
+  putJ Harp                  = putJ (0 :: Int8)
   putJ DoubleBass            = putJ (1 :: Int8)
   putJ SnareDrum             = putJ (2 :: Int8)
   putJ Sticks                = putJ (3 :: Int8)
   putJ BassDrum              = putJ (4 :: Int8)
-  putJ Harp                  = putJ (5 :: Int8)
   putJ (OtherInstrument tag) = putJ tag
 
 data InventoryType
