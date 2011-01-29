@@ -93,8 +93,8 @@ updateGameState (MultiblockChange chunkLoc changes) gs
 updateGameState (BlockChange x y z blockid meta) gs
   = (Nothing, gs) <$ setBlock x y z blockid meta (blockMap gs)
 
-updateGameState (Prechunk x z False) gs
-  = do gs' <- updateBlockMap (return . Map.delete (x,z)) gs
+updateGameState (Prechunk chunk UnloadChunk) gs
+  = do gs' <- updateBlockMap (return . Map.delete chunk) gs
        return (Nothing, gs')
 
 updateGameState _ gs = return (Nothing, gs)

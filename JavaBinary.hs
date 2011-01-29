@@ -9,9 +9,18 @@ import Data.ByteString.Lazy
 import Data.ByteString.Lazy.UTF8
 import Data.Int
 
+-- | 'encode' serializes a single value to a 'ByteString'.
 encode :: JavaBinary a => a -> ByteString
 encode = runPut . putJ
 
+-- | 'decode' deserializes a single value from a 'ByteString'.
+-- This function will hide errors using asynchronous exceptions.
+decode :: JavaBinary a => ByteString -> a
+decode = runGet getJ
+
+-- | 'JavaBinary' provides serialization support for data
+-- matching the serialization used when Java (at least as used in Minecraft)
+-- writes to a socket.
 class JavaBinary a where
   getJ :: Get a
   putJ :: a -> Put
@@ -41,9 +50,9 @@ instance JavaBinary Float where
   putJ = putFloat32be
 
 instance JavaBinary Bool where
-  getJ = ((0 :: Int8) /=) `fmap` getJ
+  getJ       = ((0 :: Int8) /=) `fmap` getJ
   putJ False = putJ (0 :: Int8)
-  putJ True = putJ (1 :: Int8)
+  putJ True  = putJ (1 :: Int8)
 
 instance JavaBinary String where
   getJ = do

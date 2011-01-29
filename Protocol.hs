@@ -54,7 +54,7 @@ data Message
                  Int64  --  Map Seed
                  Int8   --  Dimension
 
-  | Handshake    String --  Username
+  | Handshake    String --  Session ID
 
   | Chat         String --  Message
 
@@ -204,9 +204,7 @@ data Message
 
   | EntityMetadata EntityId Metadata
 
-  | Prechunk Int32 --  X
-             Int32 --  Z
-             Bool  --  Load on True, Unload on False
+  | Prechunk ChunkLoc PrechunkStatus
 
   | Mapchunk Int32 --  X
              Int16 --  Y
@@ -279,6 +277,8 @@ data Message
 
   deriving (Show, Read)
 
+-- | 'AutoGet' provides a short-cut to writing 'getJ' implementations
+-- for simple message constructors.
 class AutoGet a where
   autoGet :: a -> Get Message
 
@@ -286,11 +286,26 @@ instance AutoGet Message where
   autoGet m = return m
 
 instance (JavaBinary x, AutoGet y) => AutoGet (x -> y) where
-  autoGet f = autoGet . f =<< getJ
+  autoGet f = do x <- getJ
+                 autoGet (f x)
 
 instance JavaBinary Message where
   getJ = getMessage
   putJ = putMessage
+
+data PrechunkStatus
+  = LoadChunk
+  | UnloadChunk
+  deriving (Read, Show, Eq)
+
+instance JavaBinary PrechunkStatus where
+  getJ = do
+    tag <- getJ :: Get Int8
+    return $! case tag of
+      0 -> UnloadChunk
+      _ -> LoadChunk
+  putJ UnloadChunk = putJ (0 :: Int8)
+  putJ LoadChunk   = putJ (1 :: Int8)
 
 data EntityStatus
   = Damaged
@@ -1139,10 +1154,9 @@ putMessage (EntityMetadata eid meta) = do
   putJ eid
   putJ meta
 
-putMessage (Prechunk x z mode) = do
+putMessage (Prechunk chunk mode) = do
   putJ (0x32 :: MessageTag)
-  putJ x
-  putJ z
+  putJ chunk
   putJ mode
 
 putMessage (Mapchunk x y z szx szy szz bs ms b s) = do
