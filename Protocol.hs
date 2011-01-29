@@ -2,18 +2,22 @@
 {-# LANGUAGE GeneralizedNewtypeDeriving #-}
 module Protocol where
 
+-- import Codec.Compression.Zlib
+import Codec.Compression.Zlib
+import qualified Codec.Compression.Zlib.Internal as ZI
 import Control.Applicative
 import Control.Monad
 import Data.Binary.Get
 import Data.Binary.Put
 import Data.Bits
-import Data.Int
 import Data.Foldable
+import Data.Int
 import Data.Traversable
-import qualified Data.ByteString.Char8
-import qualified Data.ByteString.Lazy
+import Debug.Trace
 import JavaBinary
-import Codec.Compression.Zlib
+import qualified Data.ByteString.Lazy as L
+import qualified Data.ByteString.Lazy.Internal as LI
+import Data.ByteString.Lazy (ByteString)
 
 type MessageTag = Int8
 
@@ -209,9 +213,9 @@ data Message
              Int8  --  Y length
              Int8  --  Z length
              [BlockId] 
-             Data.ByteString.Lazy.ByteString
-             Data.ByteString.Lazy.ByteString
-             Data.ByteString.Lazy.ByteString
+             ByteString
+             ByteString
+             ByteString
 
   | MultiblockChange Int32 --  Chunk X
                      Int32 --  Chunk Z
@@ -297,14 +301,15 @@ data InstrumentType
   deriving (Show, Read)
 
 instance JavaBinary InstrumentType where
-  getJ = fmap (\tag -> case tag of
+  getJ = do
+    tag <- getJ
+    return $! case tag of
       1 -> DoubleBass
       2 -> SnareDrum
       3 -> Sticks
       4 -> BassDrum
       5 -> Harp
-      _ -> OtherInstrument tag
-    ) getJ
+      _ -> trace ("Unknown instrument " ++ show tag) (OtherInstrument tag)
 
   putJ DoubleBass            = putJ (1 :: Int8)
   putJ SnareDrum             = putJ (2 :: Int8)
@@ -318,22 +323,24 @@ data InventoryType
   | WorkbenchInventory
   | FurnaceInventory
   | DispenserInventory
+  | UnknownInventory Int8
   deriving (Show, Read)
 
 instance JavaBinary InventoryType where
   getJ = do
     tag <- getJ
-    case tag :: Int8 of
-      0 -> return BasicInventory
-      1 -> return WorkbenchInventory
-      2 -> return FurnaceInventory
-      3 -> return DispenserInventory
-      _ -> error ("Unknown inventory " ++ show tag)
+    return $! case tag :: Int8 of
+      0 -> BasicInventory
+      1 -> WorkbenchInventory
+      2 -> FurnaceInventory
+      3 -> DispenserInventory
+      _ -> trace ("Unknown inventory " ++ show tag) (UnknownInventory tag)
 
   putJ BasicInventory     = putJ (0 :: Int8)
   putJ WorkbenchInventory = putJ (1 :: Int8)
   putJ FurnaceInventory   = putJ (2 :: Int8)
   putJ DispenserInventory = putJ (3 :: Int8)
+  putJ (UnknownInventory tag) = putJ tag
 
 
 data MobId
@@ -349,6 +356,7 @@ data MobId
   | Sheep
   | Cow
   | Hen
+  | Squid
   | OtherMob Int8
   deriving (Show, Read, Eq)
 
@@ -369,7 +377,8 @@ instance JavaBinary MobId where
       91 -> return Sheep
       92 -> return Cow
       93 -> return Hen
-      _  -> return $ OtherMob tag
+      94 -> return Squid
+      _  -> trace ("Unknown mob " ++ show tag) (return $ OtherMob tag)
   putJ Creeper        = putJ (50 :: Int8)
   putJ Skeleton       = putJ (51 :: Int8)
   putJ Spider         = putJ (52 :: Int8)
@@ -382,6 +391,7 @@ instance JavaBinary MobId where
   putJ Sheep          = putJ (91 :: Int8)
   putJ Cow            = putJ (92 :: Int8)
   putJ Hen            = putJ (93 :: Int8)
+  putJ Squid          = putJ (94 :: Int8)
   putJ (OtherMob tag) = putJ (tag :: Int8)
 
 data BlockId
@@ -474,93 +484,93 @@ data BlockId
 instance JavaBinary BlockId where
   getJ = do
     tag <- getJ
-    case tag :: Int8 of
-      0x00 -> return Air
-      0x01 -> return Stone
-      0x02 -> return Grass
-      0x03 -> return Dirt
-      0x04 -> return Cobblestone
-      0x05 -> return WoodenPlank
-      0x06 -> return Sapling
-      0x07 -> return Bedrock
-      0x08 -> return Water
-      0x09 -> return StationaryWater
-      0x0A -> return Lava
-      0x0B -> return StationaryLava
-      0x0C -> return Sand
-      0x0D -> return Gravel
-      0x0E -> return Goldore
-      0x0F -> return Ironore
-      0x10 -> return Coalore
-      0x11 -> return Wood
-      0x12 -> return Leaves
-      0x13 -> return Sponge
-      0x14 -> return Glass
-      0x15 -> return LapisLazuliOre
-      0x16 -> return LapisLazuliBlock
-      0x17 -> return Dispenser
-      0x18 -> return Sandstone
-      0x19 -> return NoteBlock
-      0x23 -> return Wool
-      0x25 -> return YellowFlower
-      0x26 -> return RedRose
-      0x27 -> return BrownMushroom
-      0x28 -> return RedMushroom
-      0x29 -> return GoldBlock
-      0x2A -> return IronBlock
-      0x2B -> return DoubleStoneSlab
-      0x2C -> return StoneSlab
-      0x2D -> return Brick
-      0x2E -> return TNT
-      0x2F -> return Bookshelf
-      0x30 -> return MossStone
-      0x31 -> return Obsidian
-      0x32 -> return Torch
-      0x33 -> return Fire
-      0x34 -> return MonsterSpawner
-      0x35 -> return WoodenStairs
-      0x36 -> return Chest
-      0x37 -> return RedstoneWire
-      0x38 -> return DiamondOre
-      0x39 -> return DiamondBlock
-      0x3A -> return Workbench
-      0x3B -> return Crops
-      0x3C -> return Soil
-      0x3D -> return Furnace
-      0x3E -> return BurningFurnace
-      0x3F -> return SignPost
-      0x40 -> return WoodenDoor
-      0x41 -> return Ladder
-      0x42 -> return MinecartTracks
-      0x43 -> return CobblestoneStairs
-      0x44 -> return WallSign
-      0x45 -> return Lever
-      0x46 -> return StonePressurePlate
-      0x47 -> return IronDoor
-      0x48 -> return WoodenPressurePlate
-      0x49 -> return RedstoneOre
-      0x4A -> return GlowingRedstoneOre
-      0x4B -> return RedstoneTorchOff
-      0x4C -> return RedstoneTorchOn
-      0x4D -> return StoneButton
-      0x4E -> return Snow
-      0x4F -> return Ice
-      0x50 -> return SnowBlock
-      0x51 -> return Cactus
-      0x52 -> return Clay
-      0x53 -> return SugarCane
-      0x54 -> return Jukebox
-      0x55 -> return Fence
-      0x56 -> return Pumpkin
-      0x57 -> return Netherrack
-      0x58 -> return SoulSand
-      0x59 -> return Glowstone
-      0x5A -> return Portal
-      0x5B -> return JackOLantern
-      0x5C -> return Cake
-      _ -> return $ UnknownBlock tag
+    return $!
+     case tag :: Int8 of
+      0x00 -> Air
+      0x01 -> Stone
+      0x02 -> Grass
+      0x03 -> Dirt
+      0x04 -> Cobblestone
+      0x05 -> WoodenPlank
+      0x06 -> Sapling
+      0x07 -> Bedrock
+      0x08 -> Water
+      0x09 -> StationaryWater
+      0x0A -> Lava
+      0x0B -> StationaryLava
+      0x0C -> Sand
+      0x0D -> Gravel
+      0x0E -> Goldore
+      0x0F -> Ironore
+      0x10 -> Coalore
+      0x11 -> Wood
+      0x12 -> Leaves
+      0x13 -> Sponge
+      0x14 -> Glass
+      0x15 -> LapisLazuliOre
+      0x16 -> LapisLazuliBlock
+      0x17 -> Dispenser
+      0x18 -> Sandstone
+      0x19 -> NoteBlock
+      0x23 -> Wool
+      0x25 -> YellowFlower
+      0x26 -> RedRose
+      0x27 -> BrownMushroom
+      0x28 -> RedMushroom
+      0x29 -> GoldBlock
+      0x2A -> IronBlock
+      0x2B -> DoubleStoneSlab
+      0x2C -> StoneSlab
+      0x2D -> Brick
+      0x2E -> TNT
+      0x2F -> Bookshelf
+      0x30 -> MossStone
+      0x31 -> Obsidian
+      0x32 -> Torch
+      0x33 -> Fire
+      0x34 -> MonsterSpawner
+      0x35 -> WoodenStairs
+      0x36 -> Chest
+      0x37 -> RedstoneWire
+      0x38 -> DiamondOre
+      0x39 -> DiamondBlock
+      0x3A -> Workbench
+      0x3B -> Crops
+      0x3C -> Soil
+      0x3D -> Furnace
+      0x3E -> BurningFurnace
+      0x3F -> SignPost
+      0x40 -> WoodenDoor
+      0x41 -> Ladder
+      0x42 -> MinecartTracks
+      0x43 -> CobblestoneStairs
+      0x44 -> WallSign
+      0x45 -> Lever
+      0x46 -> StonePressurePlate
+      0x47 -> IronDoor
+      0x48 -> WoodenPressurePlate
+      0x49 -> RedstoneOre
+      0x4A -> GlowingRedstoneOre
+      0x4B -> RedstoneTorchOff
+      0x4C -> RedstoneTorchOn
+      0x4D -> StoneButton
+      0x4E -> Snow
+      0x4F -> Ice
+      0x50 -> SnowBlock
+      0x51 -> Cactus
+      0x52 -> Clay
+      0x53 -> SugarCane
+      0x54 -> Jukebox
+      0x55 -> Fence
+      0x56 -> Pumpkin
+      0x57 -> Netherrack
+      0x58 -> SoulSand
+      0x59 -> Glowstone
+      0x5A -> Portal
+      0x5B -> JackOLantern
+      0x5C -> Cake
+      _ -> trace ("Unknown block " ++ show tag) (UnknownBlock tag) 
 
-  putJ (UnknownBlock tag)                = putJ (tag :: Int8)
   putJ Air                = putJ (0x00 :: Int8)
   putJ Stone              = putJ (0x01 :: Int8)
   putJ Grass              = putJ (0x02 :: Int8)
@@ -644,6 +654,7 @@ instance JavaBinary BlockId where
   putJ Portal             = putJ (0x5A :: Int8)
   putJ JackOLantern       = putJ (0x5B :: Int8)
   putJ Cake               = putJ (0x5C :: Int8)
+  putJ (UnknownBlock tag) = putJ (tag :: Int8)
 
 data Metadata = Metadata [MetadataEntry]
  deriving (Show, Read)
@@ -688,10 +699,10 @@ data Action
 instance JavaBinary Action where
   getJ = do
     tag <- getJ
-    case tag of
-      1 -> return ActionCrouch
-      2 -> return ActionUncrouch
-      _ -> return $ ActionOther tag
+    return $! case tag of
+      1 -> ActionCrouch
+      2 -> ActionUncrouch
+      _ -> trace ("Unknown action " ++ show tag) (ActionOther tag)
   putJ ActionCrouch      = putJ (1 :: Int8)
   putJ ActionUncrouch    = putJ (2 :: Int8)
   putJ (ActionOther tag) = putJ tag
@@ -728,23 +739,25 @@ data DiggingStatus
   | StoppedDigging
   | BlockBroken
   | DropItem
+  | OtherDigging Int8
   deriving (Show, Read)
 
 instance JavaBinary DiggingStatus where
   getJ = do
     tag <- getJ
-    case tag :: Int8 of
-      0 -> return StartedDigging
-      1 -> return Digging
-      2 -> return StoppedDigging
-      3 -> return BlockBroken
-      4 -> return DropItem
-      _ -> error $ "unknown digging status " ++ show tag
+    return $! case tag :: Int8 of
+      0 -> StartedDigging
+      1 -> Digging
+      2 -> StoppedDigging
+      3 -> BlockBroken
+      4 -> DropItem
+      _ -> trace ("Unknown digging status " ++ show tag) (OtherDigging tag)
   putJ StartedDigging = putJ (0 :: Int8)
   putJ Digging        = putJ (1 :: Int8)
   putJ StoppedDigging = putJ (2 :: Int8)
   putJ BlockBroken    = putJ (3 :: Int8)
   putJ DropItem       = putJ (4 :: Int8)
+  putJ (OtherDigging tag) = putJ tag
 
 data Face
   = Y1 | Y2 | Z1 | Z2 | X1 | X2 | None
@@ -753,15 +766,16 @@ data Face
 instance JavaBinary Face where
   getJ = do
     tag <- getJ
-    case tag :: Int8 of
-      -1 -> return None
-      0 -> return Y1
-      1 -> return Y2
-      2 -> return Z1
-      3 -> return Z2
-      4 -> return X1
-      5 -> return X2
-      _ -> error ("Bad face? " ++ show tag)
+    return $! case tag :: Int8 of
+      -1 -> None
+      0 -> Y1
+      1 -> Y2
+      2 -> Z1
+      3 -> Z2
+      4 -> X1
+      5 -> X2
+      _ -> error ("Bad face " ++ show tag)
+
   putJ None = putJ (-1 :: Int8)
   putJ Y1   = putJ (0  :: Int8)
   putJ Y2   = putJ (1  :: Int8)
@@ -771,7 +785,7 @@ instance JavaBinary Face where
   putJ X2   = putJ (5  :: Int8)
 
 -- | Get a lazy ByteString prefixed with a 32-bit length.
-getLazyByteString32 :: Get Data.ByteString.Lazy.ByteString
+getLazyByteString32 :: Get ByteString
 getLazyByteString32 = getLazyByteString . fromIntegral =<< getWord32be
 
 getMaybe16 :: Get a -> Get (Maybe a)
@@ -837,14 +851,15 @@ getMessage = do
                                * (fromIntegral sz + 1)
                len <- getJ :: Get Int32
                compressed <- getLazyByteString (fromIntegral len)
-               let (blocks, metas, blights, slights) = runGet (
-                     (,,,)
-                       <$> replicateM (fromIntegral block_count) getJ
-                       <*> getLazyByteString (block_count `div` 2)
-                       <*> getLazyByteString (block_count `div` 2)
-                       <*> getLazyByteString (block_count `div` 2) )
-                                       (decompress compressed)
-               return $ Mapchunk x y z sx sy sz blocks metas blights slights
+               return $ case safeDecompress compressed of
+                 Left errorMsg -> proxyChat "Bad chunk, attempting to continue"
+                 Right uncompressed ->
+                  let parser = Mapchunk x y z sx sy sz
+                           <$> replicateM (fromIntegral block_count) getJ
+                           <*> getLazyByteString (block_count `div` 2)
+                           <*> getLazyByteString (block_count `div` 2)
+                           <*> getLazyByteString (block_count `div` 2)
+                  in runGet parser uncompressed
                
     0x34 -> MultiblockChange <$> getJ <*> getJ <*> changes
       where changes = do
@@ -1111,7 +1126,7 @@ putMessage (Mapchunk x y z szx szy szz bs ms b s) = do
                                      *> putLazyByteString ms
                                      *> putLazyByteString b
                                      *> putLazyByteString s
-  putWord32be (fromIntegral (Data.ByteString.Lazy.length compressed))
+  putWord32be (fromIntegral (L.length compressed))
   putLazyByteString compressed
 
 
@@ -1207,8 +1222,15 @@ putMessage (Disconnect reason) = do
   putJ (0xff :: MessageTag)
   putJ reason
 
-toMessages :: Data.ByteString.Lazy.ByteString -> [Message]
+toMessages :: ByteString -> [Message]
 toMessages bs = msg : toMessages rest
   where
   (msg, rest) = runGet (liftA2 (,) getJ getRemainingLazyByteString) bs
 
+safeDecompress :: ByteString -> Either String ByteString
+safeDecompress
+  = ZI.foldDecompressStream (fmap . LI.Chunk) (Right LI.Empty) (\ _ str -> Left str)
+  . ZI.decompressWithErrors ZI.zlibFormat ZI.defaultDecompressParams
+
+proxyChat :: String -> Message
+proxyChat text = Chat $ "\194\167\&6" ++ text

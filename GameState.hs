@@ -24,7 +24,10 @@ import JavaBinary
 
 type EntityMap = Map EntityId (Either String MobId, Int32, Int32, Int32)
 
-type BlockMap  = Map (Int32, Int32) (IOArray (Int8, Int8, Int8) BlockId, IOUArray (Int8, Int8, Int8) Word8)
+type ChunkLoc = (Int32, Int32)
+type BlockLoc = (Int8, Int8, Int8)
+
+type BlockMap  = Map ChunkLoc (IOArray BlockLoc BlockId, IOUArray BlockLoc Word8)
 
 data GameState = GS
   { entityMap :: !EntityMap 
@@ -111,7 +114,7 @@ updateGameState (BlockChange x y z blockid meta) gs
 updateGameState _ gs = return (Nothing, gs)
 
 
-decomposeCoords :: Int32 -> Int32 -> Int32 -> ((Int32, Int32), (Int8, Int8, Int8))
+decomposeCoords :: Int32 -> Int8 -> Int32 -> ((Int32, Int32), (Int8, Int8, Int8))
 decomposeCoords x y z = ((x `shiftR` 4
                         ,z `shiftR` 4)
                         ,(fromIntegral $ x .&. 0xf
