@@ -336,36 +336,30 @@ lookupBlock bm chunkC blockC = do
     readArray blockArray blockC
 
 filterGlassUpdate :: BlockMap -> BlockId -> (ChunkLoc, [BlockLoc]) -> IO (ChunkLoc, [BlockLoc])
-filterGlassUpdate bm victim ((cx,cz), blocks) = do
+filterGlassUpdate bm victim (chunk, blocks) = do
   let isVictim x = x == Just victim
-  xs <- filterM (\ c -> isVictim <$> lookupBlock bm (cx,cz) c) blocks
-  return ((cx,cz),xs)
+  xs <- filterM (\ c -> isVictim <$> lookupBlock bm chunk c) blocks
+  return (chunk,xs)
 
 makeGlassUpdate :: (ChunkLoc,[BlockLoc]) -> [Message]
 makeGlassUpdate (_, []) = []
-makeGlassUpdate ((cx,cz), coords)
-  = [MultiblockChange cx cz [(packCoords c, Glass, 0) | c <- coords]]
+makeGlassUpdate (chunk, coords)
+  = [MultiblockChange chunk [(c, Glass, 0) | c <- coords]]
 
 makeRestore :: BlockMap -> Map ChunkLoc (Set BlockLoc) -> IO [Message]
 makeRestore bm = sequence . mapMaybe toMessage . Map.toList
   where
   toMessage :: (ChunkLoc, Set BlockLoc) -> Maybe (IO Message)
-  toMessage (chunk@(cx,cz), blocks)
+  toMessage (chunk, blocks)
     = do guard (not (Set.null blocks))
          (blockArray, metaArray) <- Map.lookup chunk bm
-         return $ fmap (MultiblockChange cx cz)
+         return $ fmap (MultiblockChange chunk)
                 $ for (Set.toList blocks) $ \ b ->
                     do blockType <- readArray blockArray b
                        blockMeta <- readArray metaArray  b
-                       return (packCoords b, blockType, fromIntegral blockMeta)
+                       return (b, blockType, fromIntegral blockMeta)
                      
  
--- | 'packCoords' packs coordinates local to a chunk into a single
--- 'Int16'.
-packCoords :: BlockLoc -> Int16
-packCoords (x,y,z) = fromIntegral (fromIntegral x `shiftL` 12
-                               .|. fromIntegral z `shiftL` 8
-                               .|. fromIntegral y :: Word16)
  
 
 chunkedCoords :: [(Int32,Int8,Int32)] -> [(ChunkLoc, [BlockLoc])]

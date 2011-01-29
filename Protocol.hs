@@ -11,6 +11,7 @@ import Data.Bits
 import Data.ByteString.Lazy (ByteString)
 import Data.Foldable
 import Data.Int
+import Data.Word
 import Debug.Trace
 import qualified Codec.Compression.Zlib.Internal as ZI
 import qualified Data.ByteString.Lazy as L
@@ -19,6 +20,8 @@ import qualified Data.ByteString.Lazy.Internal as LI
 import JavaBinary
 
 type MessageTag = Int8
+type ChunkLoc = (Int32, Int32)
+type BlockLoc = (Int8, Int8, Int8)
 
 newtype EntityId = EID Int32
   deriving (Eq, Ord, Show,Read,JavaBinary)
@@ -216,9 +219,8 @@ data Message
              ByteString
              ByteString
 
-  | MultiblockChange Int32 --  Chunk X
-                     Int32 --  Chunk Z
-                     [(Int16, BlockId, Int8)] --  Coordinate, Block type, Meta
+  | MultiblockChange ChunkLoc
+                     [(BlockLoc, BlockId, Int8)] --  Coordinate, Block type, Meta
 
   | BlockChange Int32 --  Block X
                 Int8  --  Block Y
@@ -884,12 +886,18 @@ getMessage = do
                            <*> getLazyByteString (block_count `div` 2)
                   in runGet parser uncompressed
 
-    0x34 -> MultiblockChange <$> getJ <*> getJ <*> changes
+    0x34 -> MultiblockChange <$> getJ <*> changes
       where changes = do
               sz <- getJ :: Get Int16
-              zip3 <$> replicateM (fromIntegral sz) getJ
+              zip3 <$> (replicateM (fromIntegral sz) (splitCoord <$> getJ))
                    <*> replicateM (fromIntegral sz) getJ
                    <*> replicateM (fromIntegral sz) getJ
+            splitCoord :: Int16 -> (Int8, Int8, Int8)
+            splitCoord c = (fromIntegral (c' `shiftR` 12),
+                            fromIntegral (c' .&. 0x7f),
+                            fromIntegral (c' `shiftR` 8 .&. 0xf))
+               where c' :: Word16
+                     c' = fromIntegral c
     0x35 -> autoGet BlockChange
     0x36 -> autoGet PlayNote
     0x3c -> Explosion            <$> getJ <*> getJ <*> getJ <*> getJ <*> coords
@@ -1153,15 +1161,20 @@ putMessage (Mapchunk x y z szx szy szz bs ms b s) = do
   putLazyByteString compressed
 
 
-putMessage (MultiblockChange x z xs) = do
+putMessage (MultiblockChange chunkLoc xs) = do
   putJ (0x34 :: MessageTag)
-  putJ x
-  putJ z
+  putJ chunkLoc
   putWord16be (fromIntegral (length xs))
   let (coords, tys, metas) = unzip3 xs
-  traverse_ putJ coords
+  traverse_ (putJ . packCoords) coords
   traverse_ putJ tys
   traverse_ putJ metas
+
+  where
+  packCoords :: BlockLoc -> Int16
+  packCoords (x,y,z) = fromIntegral (fromIntegral x `shiftL` 12
+                                 .|. fromIntegral z `shiftL` 8
+                                 .|. fromIntegral y :: Word16)
 
 putMessage (BlockChange x y z ty meta) = do
   putJ (0x35 :: MessageTag)

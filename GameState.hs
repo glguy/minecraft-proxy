@@ -16,9 +16,6 @@ import Protocol
 
 type EntityMap = Map EntityId (Either String MobId, Int32, Int32, Int32)
 
-type ChunkLoc = (Int32, Int32)
-type BlockLoc = (Int8, Int8, Int8)
-
 type BlockMap  = Map ChunkLoc (IOArray BlockLoc BlockId, IOUArray BlockLoc Word8)
 
 data GameState = GS
@@ -90,8 +87,8 @@ updateGameState (Mapchunk x y z sx sy sz bs ms _ _) gs
   = do gs' <- updateBlockMap (setChunk x y z sx sy sz bs ms) gs
        return (Nothing, gs')
 
-updateGameState (MultiblockChange x z changes) gs
-  = (Nothing, gs) <$ setBlocks x z changes (blockMap gs)
+updateGameState (MultiblockChange chunkLoc changes) gs
+  = (Nothing, gs) <$ setBlocks chunkLoc changes (blockMap gs)
 
 updateGameState (BlockChange x y z blockid meta) gs
   = (Nothing, gs) <$ setBlock x y z blockid meta (blockMap gs)
@@ -156,26 +153,19 @@ setChunk x y z sx sy sz bs ms bm = do
 
 -- | 'setBlocks' updates a number of blocks within a single chunk.
 setBlocks ::
-  Int32 {- ^ Chunk X -} ->
-  Int32 {- ^ Chunk Z -} ->
-  [(Int16, BlockId, Int8)] {- ^ List of packed coordinate, block type, and metadata -} ->
+  ChunkLoc ->
+  [(BlockLoc, BlockId, Int8)] {- ^ List of packed coordinate, block type, and metadata -} ->
   BlockMap ->
   IO ()
-setBlocks x z changes bm = do
-  case Map.lookup (x,z) bm of
+setBlocks chunkLoc changes bm = do
+  case Map.lookup chunkLoc bm of
     Nothing -> return ()
     Just arr -> mapM_ (aux arr) changes
 
   where
   aux (blockArray, metaArray) (coord, ty, meta)
-    = let c = splitCoord coord
-    in writeArray blockArray c ty
-    *> writeArray metaArray c (fromIntegral meta)
-
-  splitCoord :: Int16 -> (Int8, Int8, Int8)
-  splitCoord c = (fromIntegral (c' `shiftR` 12), fromIntegral (c' .&. 0x7f), fromIntegral (c' `shiftR` 8 .&. 0xf))
-   where c' :: Word16
-         c' = fromIntegral c
+    =  writeArray blockArray coord ty
+    *> writeArray metaArray coord (fromIntegral meta)
 
 setBlock ::
   Int32 {- ^ Block X coordinate -} ->
