@@ -72,10 +72,10 @@ options :: [OptDescr (Configuration -> Configuration)]
 options =
   [ Option ['l'] ["listen-host"]
      (ReqArg (\ str c -> c { listenHost = str }) "HOSTNAME")
-     "Hostname to bind to"
+     "Optional hostname to bind to"
   , Option ['p'] ["listen-port"]
      (ReqArg (\ str c -> c { listenPort = str }) "SERVICENAME")
-     "Port to bind to"
+     "Optional port to bind to"
   , Option ['h'] ["help"]
      (NoArg (\ c -> c { configHelp = True }))
      "Print this list"
@@ -87,7 +87,10 @@ getOptions = do
   unless (null errs) $ do
     traverse_ putStrLn errs
     exitFailure
-  let usageText = "minecraft-proxy <FLAGS> SERVER-HOSTNAME SERVER-PORT"
+  let usageText =
+        "minecraft-proxy <FLAGS> SERVER-HOSTNAME SERVER-PORT\n\
+        \\n\
+        \example: minecraft-proxy -l localhost -p 2000 myserver.com 25565\n"
   when (configHelp config) $ do
     putStrLn $ usageInfo usageText options
     exitSuccess
