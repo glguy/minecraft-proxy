@@ -1284,3 +1284,6 @@ safeDecompress
 
 proxyChat :: String -> Message
 proxyChat text = Chat $ "\194\167\&6" ++ text
+
+highlight :: String -> String
+highlight text = "\194\167\&b" ++ text

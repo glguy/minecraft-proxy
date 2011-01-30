@@ -41,7 +41,7 @@ data ProxyState = PS
   , restoreVar :: MVar (Map (Int32,Int32) (Set (Int8, Int8, Int8)))
   , lineVar   :: IORef (Bool, [Message])
   , digVar    :: IORef Int
-  , followVar :: MVar (Maybe EntityId)
+  , followVar :: MVar (Maybe (String, EntityId))
   }
 
 newProxyState :: IO ProxyState
@@ -197,7 +197,7 @@ inboundLogic clientChan state msg = do
   -- Update compass
   followMsgs <- withMVar (followVar state) $ \ interested ->
     case interested of
-      Just ieid | interested == changedEid -> do
+      Just (_,ieid) | fmap snd interested == changedEid -> do
        e <- entityMap <$> readMVar (gameState state)
        return $ case Map.lookup ieid e of
          Just (_ty, x, y, z) ->
@@ -214,6 +214,11 @@ processCommand ::
   String          {- ^ chat command   -} ->
   IO ()
 
+processCommand clientChan _ "help"
+  = traverse_ (tellPlayer clientChan) helpMessage
+
+processCommand clientChan state "status"
+  = traverse_ (tellPlayer clientChan) =<< statusMessages state
 
 processCommand clientChan state text
   | "echo " `isPrefixOf` text
@@ -254,7 +259,7 @@ processCommand clientChan state "follow off" = do
 processCommand clientChan state text | "follow " `isPrefixOf` text
   = do e <- entityMap <$> readMVar (gameState state)
        case find (\ (_,(x,_,_,_)) -> x == Left key) (Map.assocs e) of
-         Just (k,_) -> swapMVar (followVar state) (Just k)
+         Just (k,_) -> swapMVar (followVar state) (Just (key,k))
                     *>  tellPlayer clientChan "Follow registered"
          Nothing -> tellPlayer clientChan "Player not found"
   where key = drop 7 text
@@ -449,3 +454,41 @@ digShift x y z face i = case face of
 
  where i' :: Num a => a
        i' = fromIntegral i
+
+helpMessage :: [String]
+helpMessage =
+  ["Commands:"
+  ,"\\status               - List proxy status"
+  ,"\\follow <player name> - Compass points to player"
+  ,"\\follow off           - Compass points to spawnpoint"
+  ,"\\dig <n>              - Multiplies dig speed by 'n'"
+  ,"\\glass {on,off}       - Glassify new chunks"
+  ,"\\through <n>          - Dig 'n' blocks behind"
+  ,"\\lines {on,off}       - Place blocks in lines on an axis"
+  ,"Right-click with clock - Glassify local sphere"
+  ,"Right-click with compass - Revert glass spheres"
+  ]
+
+statusMessages :: ProxyState -> IO [String]
+statusMessages state = sequence
+  [ return "Proxy Status ------------------------"
+  , followStatus  <$> readMVar (followVar state)
+  , digStatus     <$> readIORef (digVar state)
+  , glassStatus   <$> readIORef (glassVar state)
+  , throughStatus <$> readIORef (digThrough state)
+  , lineStatus    <$> readIORef (lineVar state)
+  , restoreStatus <$> readMVar (restoreVar state) 
+  ]
+  where
+  onOff True = highlight "on"
+  onOff False = highlight "off"
+  followStatus x = "Following " ++
+    case x of
+      Nothing -> "spawn point"
+      (Just (name,_)) -> " player: " ++ highlight name
+  digStatus x = "Dig speed: " ++ highlight (show x)
+  glassStatus b = "Glass chunks: "++ onOff b
+  throughStatus n = "Dig through: " ++ highlight (show n)
+  lineStatus (b,_) = "Line mode: " ++ onOff b
+  restoreStatus m = "Blocks to restore: " ++
+    highlight (show (Data.Foldable.sum (fmap Set.size (Map.elems m))))
