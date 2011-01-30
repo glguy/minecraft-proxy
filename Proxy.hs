@@ -25,6 +25,7 @@ import Prelude hiding (getContents)
 import System.Console.GetOpt
 import System.Environment
 import System.Exit
+import System.IO hiding (getContents)
 import qualified Data.ByteString.Lazy as L
 import qualified Data.Map as Map
 import qualified Data.Set as Set
@@ -58,85 +59,64 @@ newProxyState = do
   return PS {..}
 
 data Configuration = Config
-  { listenHost :: HostName
+  { listenHost :: Maybe HostName
   , listenPort :: ServiceName
   , configHelp :: Bool }
 
 defaultConfig = Config
-  { listenHost = "localhost"
+  { listenHost = Nothing
   , listenPort = "25565"
   , configHelp = False
   }
 
-options :: [OptDescr (Configuration -> Configuration)]
-options =
-  [ Option ['l'] ["listen-host"]
-     (ReqArg (\ str c -> c { listenHost = str }) "HOSTNAME")
-     "Optional hostname to bind to"
-  , Option ['p'] ["listen-port"]
-     (ReqArg (\ str c -> c { listenPort = str }) "SERVICENAME")
-     "Optional port to bind to"
-  , Option ['h'] ["help"]
-     (NoArg (\ c -> c { configHelp = True }))
-     "Print this list"
-  ]
 
-getOptions = do
-  (fs, args, errs) <- getOpt Permute options <$> getArgs
-  let config = foldl' (\ c f -> f c) defaultConfig fs
-  unless (null errs) $ do
-    traverse_ putStrLn errs
-    exitFailure
-  let usageText =
-        "minecraft-proxy <FLAGS> SERVER-HOSTNAME SERVER-PORT\n\
-        \\n\
-        \example: minecraft-proxy -l localhost -p 2000 myserver.com 25565\n"
-  when (configHelp config) $ do
-    putStrLn $ usageInfo usageText options
-    exitSuccess
-  case args of
-    [host,port] -> return (host,port,config)
-    _ -> do putStrLn $ usageInfo usageText options
-            exitFailure
-
-addrInfoHints =  defaultHints { addrFamily = AF_INET
-                              , addrSocketType = Stream
-                              , addrFlags = [AI_PASSIVE] }
 
 main :: IO ()
 main = do
   (host,port,config) <- getOptions
 
-  ais <- getAddrInfo (Just addrInfoHints)
-           (Just (listenHost config))
-           (Just (listenPort config))
-  addr <- case ais of
-    (ai : _ ) -> return $ addrAddress ai
-    [] -> fail "Unable to resolve bind address"
+  let passiveHints = defaultHints { addrSocketType = Stream
+                                  , addrFlags = [AI_ADDRCONFIG,AI_PASSIVE] }
+  proxyAIs <- getAddrInfo (Just passiveHints)
+                          (listenHost config)
+                          (Just (listenPort config))
 
-  l <- socket AF_INET Stream defaultProtocol
+  let activeHints = defaultHints { addrSocketType = Stream
+                                 , addrFlags      = [AI_ADDRCONFIG] }
+  serverAI <- head <$> getAddrInfo (Just activeHints) (Just host) (Just port)
+
+  waitThreadGroup $ map (makeListenerThread serverAI) proxyAIs
+
+
+-- | 'makeListenerThread' binds to the specified address on the proxy
+-- and makes connections to the specified server address.
+makeListenerThread ::
+  AddrInfo {- ^ Server's address information -} ->
+  AddrInfo {- ^ Proxy's address information  -} ->
+  IO ()
+makeListenerThread serverAI proxyAI = do
+  l <- addrInfoToSocket proxyAI
   setSocketOption l ReuseAddr 1
-  bindSocket l addr
+  bindSocketToAddrInfo l proxyAI
   listen l 5
 
   putStrLn "Ready to accept connections"
 
-  forever $ do res <- accept l
-               _ <- forkIO (handleClient host port res)
+  forever $ do (clientSock, clientAddr) <- accept l
+               _ <- forkIO (handleClient serverAI clientSock clientAddr)
                return ()
 
-handleClient :: HostName -> ServiceName -> (Socket, SockAddr) -> IO ()
-handleClient host port (c,csa) = do
+handleClient ::
+  AddrInfo    {- ^ Server's information  -} ->
+  Socket      {- ^ Client's socket -}       ->
+  SockAddr    {- ^ Client's address -}      ->
+  IO ()
+handleClient serverAI c csa = do
   putStr "Got connection from "
   print csa
 
-  ais <- getAddrInfo (Just addrInfoHints) (Just host) (Just port)
-  addr <- case ais of
-    (ai : _ ) -> return $ addrAddress ai
-    _ -> fail "Unable to resolve server address"
-
-  s <- socket AF_INET Stream defaultProtocol
-  connect s addr
+  s <- addrInfoToSocket serverAI
+  connectToAddrInfo s serverAI
   proxy c s
 
  `Control.Exception.catch` \ (SomeException e) -> do
@@ -458,11 +438,23 @@ nearby ::
 nearby x y z = filter inSphere box
   where radius :: Num a => a
         radius = 10
-        inSphere (x1,y1,z1) = squared radius > (squared (x1-x) + fromIntegral (squared (y1-y)) + squared (z1-z))
+        inSphere (x1,y1,z1)
+          = squared radius > ( squared (x1-x)
+                             + fromIntegral (squared (y1-y))
+                             + squared (z1-z))
         squared i = i * i
-        box = (,,) <$> [x-radius .. x+radius] <*> [y-radius .. y+radius] <*> [z-radius .. z+radius]
+        box = (,,) <$> [x-radius .. x+radius]
+                   <*> [y-radius .. y+radius]
+                   <*> [z-radius .. z+radius]
 
-digShift :: Int32 -> Int8 -> Int32 -> Face -> Int -> (Int32, Int8, Int32)
+-- | 'digShift' alters a set of coordinates given a depth and face.
+digShift ::
+  Int32 {- ^ X coordinate -} ->
+  Int8  {- ^ Y coordinate -} ->
+  Int32 {- ^ Z coordinate -} ->
+  Face ->
+  Int   {- ^ depth        -} ->
+  (Int32, Int8, Int32)
 digShift x y z face i = case face of
   X1 -> (x+i',y,z)
   X2 -> (x-i',y,z)
@@ -475,6 +467,7 @@ digShift x y z face i = case face of
  where i' :: Num a => a
        i' = fromIntegral i
 
+-- | 'helpMessage' is sent to the client in response to "\help"
 helpMessage :: [String]
 helpMessage =
   ["Commands:"
@@ -491,6 +484,8 @@ helpMessage =
   ,"Right-click with compass - Revert glass spheres"
   ]
 
+-- | 'statusMessage' computes a list of messages to send to the client
+-- based on the current proxy state.
 statusMessages :: ProxyState -> IO [String]
 statusMessages state = sequence
   [ return "Proxy Status ------------------------"
@@ -503,17 +498,88 @@ statusMessages state = sequence
   , restoreStatus <$> readMVar (restoreVar state) 
   ]
   where
-  onOff True = highlight "on"
+  onOff True  = highlight "on"
   onOff False = highlight "off"
-  followStatus x = "Following " ++
-    case x of
-      Nothing -> "spawn point"
-      (Just (name,_)) -> " player: " ++ highlight name
+
+  followStatus Nothing = "Following spawn point"
+  followStatus (Just (name,_)) = "Following player: " ++ highlight name
+
   digStatus x = "Dig speed: " ++ highlight (show x)
+
   glassStatus b = "Glass chunks: "++ onOff b
+
   throughStatus n = "Dig through: " ++ highlight (show n)
+
   lineStatus (b,_) = "Line mode: " ++ onOff b
+
   timeStatus Nothing = "Time mode normal"
   timeStatus (Just x) = "Time fixed at: " ++ highlight (show x)
+
   restoreStatus m = "Blocks to restore: " ++
     highlight (show (Data.Foldable.sum (fmap Set.size (Map.elems m))))
+
+-- Threading helpers
+
+-- | 'waitThreadGroup' runs multiple computations in parallel
+-- and kills the group if one of those computations terminates
+waitThreadGroup ::
+  [IO ()] {- ^ Operations to run in parallel -} ->
+  IO ()
+waitThreadGroup xs = do
+  var <- newEmptyMVar
+  threadIds <- for xs $ \ x -> forkIO $ x `Control.Exception.catch`
+                                          \ (SomeException e) -> print e >> putMVar var ()
+  takeMVar var
+  traverse_ killThread threadIds
+  where
+  n = length xs
+
+
+-- Networking Helpers
+
+addrInfoToSocket :: AddrInfo -> IO Socket
+addrInfoToSocket AddrInfo {..} = socket addrFamily addrSocketType addrProtocol
+
+bindSocketToAddrInfo :: Socket -> AddrInfo -> IO ()
+bindSocketToAddrInfo sock AddrInfo {..} = bindSocket sock addrAddress
+
+connectToAddrInfo :: Socket -> AddrInfo -> IO ()
+connectToAddrInfo sock AddrInfo {..} = connect sock addrAddress
+
+
+-- Command-line option processing
+
+options :: [OptDescr (Configuration -> Configuration)]
+options =
+  [ Option ['l'] ["listen-host"]
+     (ReqArg (\ str c -> c { listenHost = Just str }) "PROXY-HOSTNAME")
+     "Optional hostname to bind to"
+  , Option ['p'] ["listen-port"]
+     (ReqArg (\ str c -> c { listenPort = str }) "PROXY-SERVICENAME")
+     "Optional port to bind to"
+  , Option ['h'] ["help"]
+     (NoArg (\ c -> c { configHelp = True }))
+     "Print this list"
+  ]
+
+usageText :: String
+usageText =
+  "minecraft-proxy <FLAGS> SERVER-HOSTNAME SERVER-PORT\n\
+  \\n\
+  \example: minecraft-proxy -l localhost -p 2000 example.com 25565\n"
+
+getOptions = do
+  (fs, args, errs) <- getOpt Permute options <$> getArgs
+  let config = foldl' (\ c f -> f c) defaultConfig fs
+  unless (null errs) $ do
+    traverse_ (hPutStrLn stderr) errs
+    hPutStrLn stderr $ usageInfo usageText options
+    exitFailure
+  when (configHelp config) $ do
+    hPutStrLn stderr $ usageInfo usageText options
+    exitSuccess
+  case args of
+    [host,port] -> return (host,port,config)
+    _ -> do hPutStrLn stderr "Required server-host and server-port missing\n"
+            hPutStrLn stderr $ usageInfo usageText options
+            exitFailure
