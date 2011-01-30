@@ -168,16 +168,6 @@ processCommand clientChan state text
       [(msg,_)] -> sendMessages clientChan [msg]
       _ -> tellPlayer clientChan "Unable to parse message"
 
-processCommand clientChan state "restore"
-  = do restoreMap <- swapMVar (restoreVar state) Map.empty
-       bm <- blockMap <$> readMVar (gameState state)
-       msgs <- makeRestore bm restoreMap
-       if null msgs then
-         tellPlayer clientChan "Nothing to restore"
-        else do 
-         tellPlayer clientChan "Restoring!"
-         sendMessages clientChan msgs
-
 processCommand clientChan state "glass on"
   =  writeIORef (glassVar state) True
   *> tellPlayer clientChan "Glass On"
@@ -264,6 +254,17 @@ outboundLogic clientChan serverChan state msg = do
     PlayerBlockPlacement x y z _ (Just (IID 0x15B, _, _)) -> do
       attacked <- glassAttack clientChan state x y z
       return $ if attacked then [] else [msg]
+
+    PlayerBlockPlacement x y z None (Just (IID 0x159, _, _)) -> do
+       restoreMap <- swapMVar (restoreVar state) Map.empty
+       bm <- blockMap <$> readMVar (gameState state)
+       msgs <- makeRestore bm restoreMap
+       if null msgs
+        then tellPlayer clientChan "Nothing to restore"
+        else tellPlayer clientChan "Restoring!"
+          *> sendMessages clientChan msgs
+       return []
+
 
     PlayerBlockPlacement x1 y1 z1 f o | recording -> case macros of
       [PlayerBlockPlacement x y z _ _] ->
