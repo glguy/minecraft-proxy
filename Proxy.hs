@@ -22,6 +22,7 @@ import Data.Word
 import Network.Socket hiding (send)
 import Network.Socket.ByteString.Lazy
 import Prelude hiding (getContents)
+import System.Console.GetOpt
 import System.Environment
 import System.Exit
 import qualified Data.ByteString.Lazy as L
@@ -54,33 +55,85 @@ newProxyState = do
   followVar  <- newMVar Nothing
   return PS {..}
 
+data Configuration = Config
+  { listenHost :: HostName
+  , listenPort :: ServiceName
+  , configHelp :: Bool }
+
+defaultConfig = Config
+  { listenHost = "localhost"
+  , listenPort = "25565"
+  , configHelp = False
+  }
+
+options :: [OptDescr (Configuration -> Configuration)]
+options =
+  [ Option ['l'] ["listen-host"]
+     (ReqArg (\ str c -> c { listenHost = str }) "HOSTNAME")
+     "Hostname to bind to"
+  , Option ['p'] ["listen-port"]
+     (ReqArg (\ str c -> c { listenPort = str }) "SERVICENAME")
+     "Port to bind to"
+  , Option ['h'] ["help"]
+     (NoArg (\ c -> c { configHelp = True }))
+     "Print this list"
+  ]
+
+getOptions = do
+  (fs, args, errs) <- getOpt Permute options <$> getArgs
+  let config = foldl' (\ c f -> f c) defaultConfig fs
+  unless (null errs) $ do
+    traverse_ putStrLn errs
+    exitFailure
+  let usageText = "minecraft-proxy <FLAGS> SERVER-HOSTNAME SERVER-PORT"
+  when (configHelp config) $ do
+    putStrLn $ usageInfo usageText options
+    exitSuccess
+  case args of
+    [host,port] -> return (host,port,config)
+    _ -> do putStrLn $ usageInfo usageText options
+            exitFailure
+
+addrInfoHints =  defaultHints { addrFamily = AF_INET
+                              , addrSocketType = Stream
+                              , addrFlags = [AI_PASSIVE] }
+
 main :: IO ()
 main = do
-  (host,port) <- do
-    args <- getArgs
-    case args of
-      [host, port] -> return (host, port)
-      _ -> do putStrLn "Usage: minecraft-proxy host port"
-              exitFailure
+  (host,port,config) <- getOptions
 
-  l <- Network.listenOn (Network.PortNumber (fromInteger 25565))
-  putStrLn "Ready"
+  ais <- getAddrInfo (Just addrInfoHints)
+           (Just (listenHost config))
+           (Just (listenPort config))
+  addr <- case ais of
+    (ai : _ ) -> return $ addrAddress ai
+    [] -> fail "Unable to resolve bind address"
+
+  l <- socket AF_INET Stream defaultProtocol
+  setSocketOption l ReuseAddr 1
+  bindSocket l addr
+  listen l 5
+
+  putStrLn "Ready to accept connections"
+
   forever $ do res <- accept l
                _ <- forkIO (handleClient host port res)
                return ()
+
 handleClient :: HostName -> ServiceName -> (Socket, SockAddr) -> IO ()
 handleClient host port (c,csa) = do
   putStr "Got connection from "
   print csa
 
-  ais <- getAddrInfo (Just defaultHints { addrFamily = AF_INET
-                                        , addrSocketType = Stream })
-                     (Just host) (Just port)
-  case ais of
-    (ai : _ ) -> do s <- socket AF_INET Stream defaultProtocol
-                    connect s $ addrAddress ai
-                    proxy c s
+  ais <- getAddrInfo (Just addrInfoHints) (Just host) (Just port)
+  addr <- case ais of
+    (ai : _ ) -> return $ addrAddress ai
     _ -> fail "Unable to resolve server address"
+
+  s <- socket AF_INET Stream defaultProtocol
+  connect s addr
+  proxy c s
+
  `Control.Exception.catch` \ (SomeException e) -> do
       sendAll c $ encode $ Disconnect (show e)
       fail (show e)
@@ -92,22 +145,22 @@ proxy ::
   Socket {- ^ server socket -} ->
   IO ()
 proxy c s = do
+  sbs <- toMessages <$> getContents s
+  cbs <- toMessages <$> getContents c
+
   var <- newChan
   state <- newProxyState
   clientChan <- newChan
   serverChan <- newChan
   serverToProxy <- forkIO $ do
-          sbs <- getContents s
-          traverse_ (inboundLogic clientChan state) (toMessages sbs)
+          traverse_ (inboundLogic clientChan state) sbs
          `bad` writeChan var "inbound"
   proxyToClient <- forkIO $ forever (sendAll c =<< readChan clientChan)
                   `bad` writeChan var "inbound network" 
   proxyToServer <- forkIO $ forever (sendAll s =<< readChan serverChan)
                  `bad` writeChan var "outbound network" 
   clientToProxy <- forkIO $ do
-          cbs <- getContents c
-          traverse_ (outboundLogic clientChan serverChan state)
-                    (toMessages cbs)
+          traverse_ (outboundLogic clientChan serverChan state) cbs
          `bad` writeChan var "outbound"
   who <- readChan var
   putStr who
