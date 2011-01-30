@@ -38,6 +38,7 @@ data ProxyState = PS
   { gameState :: MVar GameState
   , glassVar  :: IORef Bool
   , digThrough :: IORef Int
+  , timeVar    :: IORef (Maybe Int64)
   , restoreVar :: MVar (Map (Int32,Int32) (Set (Int8, Int8, Int8)))
   , lineVar   :: IORef (Bool, [Message])
   , digVar    :: IORef Int
@@ -49,6 +50,7 @@ newProxyState = do
   gameState  <- newMVar newGameState
   glassVar   <- newIORef False
   digThrough <- newIORef 0
+  timeVar    <- newIORef Nothing
   restoreVar <- newMVar Map.empty
   lineVar    <- newIORef (False, [])
   digVar     <- newIORef 1
@@ -189,9 +191,13 @@ inboundLogic clientChan state msg = do
 
   -- Global glass modifications
   glass <- readIORef (glassVar state)
+  time  <- readIORef (timeVar state)
   let msg' = case msg of
                Mapchunk x y z sx sy sz bs a b c
                  | glass -> Mapchunk x y z sx sy sz (map makeGlass bs) a b c
+               TimeUpdate t -> case time of
+                 Nothing -> msg
+                 Just t' -> TimeUpdate t'
                _ -> msg
 
   -- Update compass
@@ -219,6 +225,17 @@ processCommand clientChan _ "help"
 
 processCommand clientChan state "status"
   = traverse_ (tellPlayer clientChan) =<< statusMessages state
+
+processCommand clientChan state "time off"
+  = writeIORef (timeVar state) Nothing
+  *> tellPlayer clientChan "Time passing"
+
+processCommand clientChan state text
+  | "time " `isPrefixOf` text
+  = case reads (drop 5 text) of
+      [(n,_)] | 0 <= n && n <= 24000 -> writeIORef (timeVar state) (Just n)
+              *> tellPlayer clientChan "Time fixed"
+      _ -> tellPlayer clientChan "Unable to parse time"
 
 processCommand clientChan state text
   | "echo " `isPrefixOf` text
@@ -465,6 +482,8 @@ helpMessage =
   ,"\\glass {on,off}       - Glassify new chunks"
   ,"\\through <n>          - Dig 'n' blocks behind"
   ,"\\lines {on,off}       - Place blocks in lines on an axis"
+  ,"\\time <n>             - Set time to value 0--24000"
+  ,"\\time off             - Allow time to pass"
   ,"Right-click with clock - Glassify local sphere"
   ,"Right-click with compass - Revert glass spheres"
   ]
@@ -477,6 +496,7 @@ statusMessages state = sequence
   , glassStatus   <$> readIORef (glassVar state)
   , throughStatus <$> readIORef (digThrough state)
   , lineStatus    <$> readIORef (lineVar state)
+  , timeStatus    <$> readIORef (timeVar state)
   , restoreStatus <$> readMVar (restoreVar state) 
   ]
   where
@@ -490,5 +510,7 @@ statusMessages state = sequence
   glassStatus b = "Glass chunks: "++ onOff b
   throughStatus n = "Dig through: " ++ highlight (show n)
   lineStatus (b,_) = "Line mode: " ++ onOff b
+  timeStatus Nothing = "Time mode normal"
+  timeStatus (Just x) = "Time fixed at: " ++ highlight (show x)
   restoreStatus m = "Blocks to restore: " ++
     highlight (show (Data.Foldable.sum (fmap Set.size (Map.elems m))))
