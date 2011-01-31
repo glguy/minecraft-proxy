@@ -52,7 +52,7 @@ Executable minecraft-proxy
   
   -- Packages needed in order to build this package.
   Build-depends:       binary, data-binary-ieee754, utf8-string, containers, base == 4.2.*,
-                       network, network-bytestring, bytestring, zlib == 0.5.3.*, array
+                       network, bytestring, zlib == 0.5.3.*, array
   
   -- Modules not exported by this package.
   -- Other-modules:       
