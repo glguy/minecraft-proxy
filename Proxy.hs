@@ -158,6 +158,7 @@ makeGlass :: BlockId -> BlockId
 makeGlass Dirt  = Glass
 makeGlass Stone = Glass
 makeGlass Grass = Glass
+makeGlass Snow  = Glass
 makeGlass other = other
 
 inboundLogic ::
