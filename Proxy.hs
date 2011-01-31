@@ -72,7 +72,7 @@ defaultConfig = Config
 
 
 main :: IO ()
-main = do
+main = withSocketsDo $ do
   (host,port,config) <- getOptions
 
   let passiveHints = defaultHints { addrSocketType = Stream
