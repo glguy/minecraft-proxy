@@ -51,8 +51,16 @@ Executable minecraft-proxy
   Main-is:             Proxy.hs
   
   -- Packages needed in order to build this package.
-  Build-depends:       binary, data-binary-ieee754, utf8-string, containers, base == 4.2.*,
-                       network-bytestring, network, bytestring, zlib == 0.5.3.*, array
+  Build-depends:
+                       array,
+                       base == 4.2.*,
+                       binary,
+                       bytestring,
+                       containers,
+                       data-binary-ieee754,
+                       network == 2.3.*,
+                       utf8-string,
+                       zlib == 0.5.3.*
   
   -- Modules not exported by this package.
   -- Other-modules:       

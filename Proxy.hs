@@ -100,7 +100,7 @@ makeListenerThread serverAI proxyAI = do
   bindSocketToAddrInfo l proxyAI
   listen l 5
 
-  putStrLn "Ready to accept connections"
+  putStr $ "Ready to accept connections on " ++ show (addrAddress proxyAI) ++ "\n"
 
   forever $ do (clientSock, clientAddr) <- accept l
                _ <- forkIO (handleClient serverAI clientSock clientAddr)
@@ -203,6 +203,9 @@ processCommand ::
   ProxyState                             ->
   String          {- ^ chat command   -} ->
   IO ()
+
+processCommand clientChan _ "console-echo"
+  = makePipeListener clientChan
 
 processCommand clientChan _ "help"
   = traverse_ (tellPlayer clientChan) helpMessage
@@ -584,3 +587,19 @@ getOptions = do
     _ -> do hPutStrLn stderr "Required server-host and server-port missing\n"
             hPutStrLn stderr $ usageInfo usageText options
             exitFailure
+
+-- External command echo support
+
+makePipeListener clientChan =
+  do forkIO $ do
+       xs <- lines <$> readFile "console"
+       tellPlayer clientChan "Console opened"
+       traverse_ process xs
+       tellPlayer clientChan "Console closed"
+      `Control.Exception.catch` \ (SomeException e) ->
+        tellPlayer clientChan $ "Console failed: " ++ show e
+     return ()
+ where
+  process x = case reads x of
+    [(y,_)] -> sendMessages clientChan [y]
+    _ -> hPutStrLn stderr $ "Failed to parse: " ++ show x
