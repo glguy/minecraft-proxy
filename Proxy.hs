@@ -20,6 +20,7 @@ import Data.Set (Set)
 import Data.Traversable (for)
 import Data.Word
 import Network.Socket hiding (send)
+import Network.Socket.ByteString
 import Network.Socket.ByteString.Lazy
 import Prelude hiding (getContents)
 import System.Console.GetOpt
@@ -120,7 +121,7 @@ handleClient serverAI c csa = do
   proxy c s
 
  `Control.Exception.catch` \ (SomeException e) -> do
-      sendAll c $ encode $ Disconnect (show e)
+      sendMany c $ L.toChunks $ encode $ Disconnect (show e)
       fail (show e)
 
 -- | 'proxy' creates the threads necessary to proxy a Minecraft
@@ -140,9 +141,9 @@ proxy c s = do
   serverToProxy <- forkIO $ do
           traverse_ (inboundLogic clientChan state) sbs
          `bad` writeChan var "inbound"
-  proxyToClient <- forkIO $ forever (sendAll c =<< readChan clientChan)
+  proxyToClient <- forkIO $ forever (sendMany c . L.toChunks =<< readChan clientChan)
                   `bad` writeChan var "inbound network" 
-  proxyToServer <- forkIO $ forever (sendAll s =<< readChan serverChan)
+  proxyToServer <- forkIO $ forever (sendMany s . L.toChunks =<< readChan serverChan)
                  `bad` writeChan var "outbound network" 
   clientToProxy <- forkIO $ do
           traverse_ (outboundLogic clientChan serverChan state) cbs
