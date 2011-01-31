@@ -13,7 +13,11 @@ Version:             0.1
 Synopsis:            A proxy server for Minecraft
 
 -- A longer description of the package.
--- Description:         
+Description:         Minecraft-proxy is a tool designed to provide structured
+  access to the messages sent between client and server in the Minecraft
+  game. This package provides full parsing of the client/server protocol
+  and comes with some basic commands and functionality extending the player's
+  capabilities.
 
 -- URL for the project homepage or repository.
 Homepage:            http://github.com/glguy/minecraft-proxy
