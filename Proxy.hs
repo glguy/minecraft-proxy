@@ -568,9 +568,9 @@ options =
 
 usageText :: String
 usageText =
-  "minecraft-proxy <FLAGS> SERVER-HOSTNAME SERVER-PORT\n\
+  "minecraft-proxy <FLAGS> SERVER-HOSTNAME [SERVER-PORT]\n\
   \\n\
-  \example: minecraft-proxy -l localhost -p 2000 example.com 25565\n"
+  \example: minecraft-proxy -l localhost -p 2000 example.com\n"
 
 getOptions = do
   (fs, args, errs) <- getOpt Permute options <$> getArgs
@@ -584,7 +584,12 @@ getOptions = do
     exitSuccess
   case args of
     [host,port] -> return (host,port,config)
-    _ -> do hPutStrLn stderr "Required server-host and server-port missing\n"
+    [host] -> return (host,defaultMinecraftPort,config)
+    (_:_:_:_) ->
+         do hPutStrLn stderr "Too many arguments\n"
+            hPutStrLn stderr $ usageInfo usageText options
+            exitFailure
+    _ -> do hPutStrLn stderr "Required server-host missing\n"
             hPutStrLn stderr $ usageInfo usageText options
             exitFailure
 

@@ -13,11 +13,16 @@ import Data.Foldable
 import Data.Int
 import Data.Word
 import Debug.Trace
+import Network.Socket (ServiceName)
 import qualified Codec.Compression.Zlib.Internal as ZI
 import qualified Data.ByteString.Lazy as L
 import qualified Data.ByteString.Lazy.Internal as LI
 
 import JavaBinary
+
+defaultMinecraftPort :: ServiceName
+defaultMinecraftPort = "25565"
+
 
 type MessageTag = Int8
 type ChunkLoc = (Int32, Int32)
