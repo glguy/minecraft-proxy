@@ -13,7 +13,7 @@ import Data.ByteString.Lazy (ByteString)
 import Data.Foldable
 import Data.IORef
 import Data.Int
-import Data.List (isPrefixOf)
+import Data.List (isPrefixOf, intercalate)
 import Data.Map (Map)
 import Data.Maybe (fromMaybe,mapMaybe)
 import Data.Set (Set)
@@ -209,6 +209,10 @@ processCommand clientChan _ "console-echo"
 
 processCommand clientChan _ "help"
   = traverse_ (tellPlayer clientChan) helpMessage
+
+processCommand clientChan state "list"
+  = do players <- listPlayers state
+       tellPlayer clientChan $ "Players: " ++ intercalate ", " players
 
 processCommand clientChan state "status"
   = traverse_ (tellPlayer clientChan) =<< statusMessages state
@@ -451,6 +455,11 @@ nearby x y z = filter inSphere box
                    <*> [y-radius .. y+radius]
                    <*> [z-radius .. z+radius]
 
+listPlayers :: ProxyState -> IO [String]
+listPlayers state = do
+  e <- entityMap <$> readMVar (gameState state)
+  return [ name | (Left name,_,_,_) <- Map.elems e]
+
 -- | 'digShift' alters a set of coordinates given a depth and face.
 digShift ::
   Int32 {- ^ X coordinate -} ->
@@ -484,6 +493,7 @@ helpMessage =
   ,"\\lines {on,off}       - Place blocks in lines on an axis"
   ,"\\time <n>             - Set time to value 0--24000"
   ,"\\time off             - Allow time to pass"
+  ,"\\list                 - List nearby players"
   ,"Right-click with clock - Glassify local sphere"
   ,"Right-click with compass - Revert glass spheres"
   ]
