@@ -44,10 +44,11 @@ data ProxyState = PS
   , lineVar   :: IORef (Bool, [Message])
   , digVar    :: IORef Int
   , followVar :: MVar (Maybe (String, EntityId))
+  , consoleFile :: Maybe String
   }
 
-newProxyState :: IO ProxyState
-newProxyState = do
+newProxyState :: Maybe String -> IO ProxyState
+newProxyState consoleFile = do
   gameState  <- newMVar newGameState
   glassVar   <- newIORef False
   digThrough <- newIORef 0
@@ -61,12 +62,14 @@ newProxyState = do
 data Configuration = Config
   { listenHost :: Maybe HostName
   , listenPort :: ServiceName
+  , configConsoleFile :: Maybe String
   , configHelp :: Bool }
 
 defaultConfig = Config
   { listenHost = Nothing
   , listenPort = "25565"
   , configHelp = False
+  , configConsoleFile = Nothing
   }
 
 
@@ -85,16 +88,17 @@ main = withSocketsDo $ do
                                  , addrFlags      = [AI_ADDRCONFIG] }
   serverAI <- head <$> getAddrInfo (Just activeHints) (Just host) (Just port)
 
-  waitThreadGroup $ map (makeListenerThread serverAI) proxyAIs
+  waitThreadGroup $ map (makeListenerThread (configConsoleFile config) serverAI) proxyAIs
 
 
 -- | 'makeListenerThread' binds to the specified address on the proxy
 -- and makes connections to the specified server address.
 makeListenerThread ::
+  Maybe FilePath {- ^ console file path -} ->
   AddrInfo {- ^ Server's address information -} ->
   AddrInfo {- ^ Proxy's address information  -} ->
   IO ()
-makeListenerThread serverAI proxyAI = do
+makeListenerThread consoleFile serverAI proxyAI = do
   l <- addrInfoToSocket proxyAI
   setSocketOption l ReuseAddr 1
   bindSocketToAddrInfo l proxyAI
@@ -103,21 +107,22 @@ makeListenerThread serverAI proxyAI = do
   putStr $ "Ready to accept connections on " ++ show (addrAddress proxyAI) ++ "\n"
 
   forever $ do (clientSock, clientAddr) <- accept l
-               _ <- forkIO (handleClient serverAI clientSock clientAddr)
+               _ <- forkIO (handleClient consoleFile serverAI clientSock clientAddr)
                return ()
 
 handleClient ::
+  Maybe FilePath {- ^ console file path -} ->
   AddrInfo    {- ^ Server's information  -} ->
   Socket      {- ^ Client's socket -}       ->
   SockAddr    {- ^ Client's address -}      ->
   IO ()
-handleClient serverAI c csa = do
+handleClient consoleFile serverAI c csa = do
   putStr "Got connection from "
   print csa
 
   s <- addrInfoToSocket serverAI
   connectToAddrInfo s serverAI
-  proxy c s
+  proxy consoleFile c s
 
  `Control.Exception.catch` \ (SomeException e) -> do
       sendAll c $ encode $ Disconnect (show e)
@@ -126,15 +131,16 @@ handleClient serverAI c csa = do
 -- | 'proxy' creates the threads necessary to proxy a Minecraft
 --   connection between a client and a server socket.
 proxy ::
+  Maybe FilePath {- ^ console file path -} ->
   Socket {- ^ client socket -} ->
   Socket {- ^ server socket -} ->
   IO ()
-proxy c s = do
+proxy consoleFile c s = do
   sbs <- toMessages <$> getContents s
   cbs <- toMessages <$> getContents c
 
   var <- newChan
-  state <- newProxyState
+  state <- newProxyState consoleFile
   clientChan <- newChan
   serverChan <- newChan
   serverToProxy <- forkIO $ do
@@ -204,8 +210,10 @@ processCommand ::
   String          {- ^ chat command   -} ->
   IO ()
 
-processCommand clientChan _ "console-echo"
-  = makePipeListener clientChan
+processCommand clientChan state "console-echo"
+  = case consoleFile state of
+      Nothing -> tellPlayer clientChan "Console not enabled"
+      Just fp -> makePipeListener clientChan fp
 
 processCommand clientChan _ "help"
   = traverse_ (tellPlayer clientChan) helpMessage
@@ -574,6 +582,9 @@ options =
   , Option ['h'] ["help"]
      (NoArg (\ c -> c { configHelp = True }))
      "Print this list"
+  , Option ['c'] ["console"]
+     (ReqArg (\ str c -> c { configConsoleFile = Just str }) "PATH")
+     "Optional console file or named-pipe name"
   ]
 
 usageText :: String
@@ -605,9 +616,9 @@ getOptions = do
 
 -- External command echo support
 
-makePipeListener clientChan =
+makePipeListener clientChan consoleFile =
   do forkIO $ do
-       xs <- lines <$> readFile "console"
+       xs <- lines <$> readFile consoleFile
        tellPlayer clientChan "Console opened"
        traverse_ process xs
        tellPlayer clientChan "Console closed"
