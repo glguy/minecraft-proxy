@@ -21,7 +21,7 @@ import Data.Traversable (for)
 import Data.Word
 import Network.Socket hiding (send)
 import Network.Socket.ByteString.Lazy
-import Prelude hiding (getContents)
+import Prelude hiding (getContents, catch)
 import System.Console.GetOpt
 import System.Environment
 import System.Exit
@@ -136,29 +136,31 @@ proxy ::
   Socket {- ^ server socket -} ->
   IO ()
 proxy consoleFile c s = do
-  sbs <- toMessages <$> getContents s
-  cbs <- toMessages <$> getContents c
 
   var <- newChan
   state <- newProxyState consoleFile
   clientChan <- newChan
   serverChan <- newChan
-  serverToProxy <- forkIO $ do
-          traverse_ (inboundLogic clientChan state) sbs
-         `bad` writeChan var "inbound"
-  proxyToClient <- forkIO $ forever (sendAll c =<< readChan clientChan)
-                  `bad` writeChan var "inbound network" 
-  proxyToServer <- forkIO $ forever (sendAll s =<< readChan serverChan)
-                 `bad` writeChan var "outbound network" 
-  clientToProxy <- forkIO $ do
-          traverse_ (outboundLogic clientChan serverChan state) cbs
-         `bad` writeChan var "outbound"
+
+
+  let bad who (SomeException e) = print e >> writeChan var who
+      start who f xsm = forkIO . handle (bad who) . traverse_ f =<< xsm
+
+
+  serverToProxy <- start "inbound"  (inboundLogic clientChan state)             (getMessages s)
+  clientToProxy <- start "outbound" (outboundLogic clientChan serverChan state) (getMessages c)
+
+  proxyToClient <- start "inbound network"  (sendAll c) (getChanContents clientChan)
+  proxyToServer <- start "outbound network" (sendAll s) (getChanContents serverChan)
+
   who <- readChan var
   putStr who
   putStrLn " died"
   traverse_ killThread [serverToProxy, proxyToClient, proxyToServer, clientToProxy]
-  where
-  bad m n = m `Control.Exception.catch` \ (SomeException e) -> print e >> n
+
+getMessages :: Socket -> IO [Message]
+getMessages s = toMessages <$> getContents s
+
 
 makeGlass :: BlockId -> BlockId
 makeGlass Dirt  = Glass
