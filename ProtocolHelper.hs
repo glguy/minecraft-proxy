@@ -1,136 +1,132 @@
-{-# LANGUAGE TemplateHaskell #-}
+{-# LANGUAGE GeneralizedNewtypeDeriving #-}
 module ProtocolHelper where
 
-import Generator
+import Codec.Compression.Zlib
 import Control.Applicative
 import Control.Monad
-import Codec.Compression.Zlib
-import qualified Codec.Compression.Zlib.Internal as ZI
-import Data.Int
-import Data.Word
-import Data.Bits
-import Data.Foldable
-import JavaBinary
 import Data.Binary.Get
 import Data.Binary.Put
+import Data.Bits
 import Data.ByteString.Lazy (ByteString)
+import Data.Foldable
+import Data.Int
+import Data.Word
+import qualified Codec.Compression.Zlib.Internal as ZI
 import qualified Data.ByteString.Lazy as L
 import qualified Data.ByteString.Lazy.Internal as LI
 
-import ProtocolBlocks
+import Generator
+import JavaBinary
+import Protocol.Tables
 
 type BlockLoc = (Int8, Int8, Int8)
 
-enum "BlockId"
-  "UnknownBlock"
-  blocks
+type MessageTag = Int8
 
-enum16 "ItemId"
-  "OtherItem" $
-  map (\(tag,name) -> (tag,"Item"++name)) blocks ++
-  [(0x100,"IronShovel")
-  ,(0x101,"IronPickaxe")
-  ,(0x102,"IronAxe")
-  ,(0x103,"FlintAndSteel")
-  ,(0x104,"Apple")
-  ,(0x105,"Bow")
-  ,(0x106,"Arrow")
-  ,(0x107,"Coal")
-  ,(0x108,"Diamond")
-  ,(0x109,"IronIngot")
-  ,(0x10A,"GoldIngot")
-  ,(0x10B,"IronSword")
-  ,(0x10C,"WoodenSword")
-  ,(0x10D,"WoodenShovel")
-  ,(0x10E,"WoodenPickaxe")
-  ,(0x10F,"WoodenAxe")
-  ,(0x110,"StoneSword")
-  ,(0x111,"StoneShovel")
-  ,(0x112,"StonePickaxe")
-  ,(0x113,"StoneAxe")
-  ,(0x114,"DiamondSword")
-  ,(0x115,"DiamondShovel")
-  ,(0x116,"DiamondPickaxe")
-  ,(0x117,"DiamondAxe")
-  ,(0x118,"Stick")
-  ,(0x119,"Bowl")
-  ,(0x11A,"MushroomSoup")
-  ,(0x11B,"GoldSword")
-  ,(0x11C,"GoldShovel")
-  ,(0x11D,"GoldPickaxe")
-  ,(0x11E,"GoldAxe")
-  ,(0x11F,"String")
-  ,(0x120,"Feather")
-  ,(0x121,"Sulphur")
-  ,(0x122,"WoodenHoe")
-  ,(0x123,"StoneHoe")
-  ,(0x124,"IronHoe")
-  ,(0x125,"DiamondHoe")
-  ,(0x126,"GoldHoe")
-  ,(0x127,"Seeds")
-  ,(0x128,"Wheat")
-  ,(0x129,"Bread")
-  ,(0x12A,"LeatherHelmet")
-  ,(0x12B,"LeatherChestplate")
-  ,(0x12C,"LeatherLeggings")
-  ,(0x12D,"LeatherBoots")
-  ,(0x12E,"ChainmailHelmet")
-  ,(0x12F,"ChainmailChestplate")
-  ,(0x130,"ChainmailLeggings")
-  ,(0x131,"ChainmailBoots")
-  ,(0x132,"IronHelmet")
-  ,(0x133,"IronChestplate")
-  ,(0x134,"IronLeggings")
-  ,(0x135,"IronBoots")
-  ,(0x136,"DiamondHelmet")
-  ,(0x137,"DiamondChestplate")
-  ,(0x138,"DiamondLeggings")
-  ,(0x139,"DiamondBoots")
-  ,(0x13A,"GoldHelmet")
-  ,(0x13B,"GoldChestplate")
-  ,(0x13C,"GoldLeggings")
-  ,(0x13D,"GoldBoots")
-  ,(0x13E,"Flint")
-  ,(0x13F,"RawPorkchop")
-  ,(0x140,"CookedPorkchop")
-  ,(0x141,"Paintings")
-  ,(0x142,"GoldenApple")
-  ,(0x143,"Sign")
-  ,(0x144,"WoodenDoorItem")
-  ,(0x145,"Bucket")
-  ,(0x146,"WaterBucket")
-  ,(0x147,"LavaBucket")
-  ,(0x148,"Minecart")
-  ,(0x149,"Saddle")
-  ,(0x14A,"IronDoorItem")
-  ,(0x14B,"Redstone")
-  ,(0x14C,"Snowball")
-  ,(0x14D,"Boat")
-  ,(0x14E,"Leather")
-  ,(0x14F,"Milk")
-  ,(0x150,"ClayBrick")
-  ,(0x151,"ClayBalls")
-  ,(0x152,"SugarCaneItem")
-  ,(0x153,"Paper")
-  ,(0x154,"Book")
-  ,(0x155,"Slimeball")
-  ,(0x156,"StorageMinecart")
-  ,(0x157,"PoweredMinecart")
-  ,(0x158,"Egg")
-  ,(0x159,"Compass")
-  ,(0x15A,"FishingRod")
-  ,(0x15B,"Clock")
-  ,(0x15C,"GlowstoneDust")
-  ,(0x15D,"RawFish")
-  ,(0x15E,"CookedFish")
-  ,(0x15F,"InkSac")
-  ,(0x160,"Bone")
-  ,(0x161,"Sugar")
-  ,(0x162,"CakeItem")
-  ,(0x8D0,"GoldMusicDisc")
-  ,(0x8D1,"GreenMusicDisc")
+type ChunkLoc = (Int32, Int32)
+
+newtype EntityId = EID Int32
+  deriving (Eq, Ord, Show,Read,JavaBinary)
+
+newtype SlotId = SID Int16
+  deriving (Eq, Ord, Show,Read,JavaBinary)
+
+newtype WindowId = WID Int8
+  deriving (Eq, Ord, Show,Read,JavaBinary)
+
+newtype TransactionId = TID Int16
+  deriving (Eq, Ord, Show,Read,JavaBinary)
+
+newtype ProgressBarId = PID Int16
+  deriving (Eq, Ord, Show,Read,JavaBinary)
+
+newtype GraphicId = GID Int32
+  deriving (Eq, Ord, Show,Read,JavaBinary)
+
+enum "InstrumentType"
+  "OtherInstrument"
+  [ (0, "Harp"       )
+  , (1, "DoubleBass" )
+  , (2, "SnareDrum"  )
+  , (3, "Sticks"     )
+  , (4, "BassDrum"   )
   ]
 
+enum "Face"
+  "UnknownFace"
+  [ (-1,"None")
+  , (0,"Y1")
+  , (1,"Y2")
+  , (2,"Z1")
+  , (3,"Z2")
+  , (4,"X1")
+  , (5,"X2")
+  ]
+
+enum "MobId"
+  "OtherMob"
+  [ (50, "Creeper")
+  , (51, "Skeleton")
+  , (52, "Spider")
+  , (53, "GiantSpider")
+  , (54, "Zombie")
+  , (55, "Slime")
+  , (56, "Ghast")
+  , (57, "ZombiePigman")
+  , (90, "Pig")
+  , (91, "Sheep")
+  , (92, "Cow")
+  , (93, "Hen")
+  , (94, "Squid")
+  ]
+
+enum "EntityStatus"
+  "OtherStatus"
+  [ (2,"Damaged")
+  , (3,"Died")
+  ]
+
+enum "InventoryType"
+  "UnknownInventory"
+  [ (0,"BasicInventory")
+  , (1,"WorkbenchInventory")
+  , (2,"FurnaceInventory")
+  , (3,"DispenserInventory")
+  ]
+
+enum "Action"
+  "ActionOther"
+  [ (1,"ActionCrouch")
+  , (2,"ActionUncrouch")
+  ]
+
+enum "Animate"
+  "OtherAnimate"
+  [ (0,"NoAnimate")
+  , (1,"SwingArm")
+  , (2,"DamageAnimation")
+  , (104,"Crouch")
+  , (105,"Uncrouch")
+  ]
+
+enum "DiggingStatus"
+  "OtherDigging"
+  [ (0,"StartedDigging")
+  , (1,"Digging")
+  , (2,"StoppedDigging")
+  , (3,"BlockBroken")
+  , (4,"DropItem")
+  ]
+
+enum "PrechunkStatus"
+  "OtherPrechunk"
+  [ (0,"UnloadChunk")
+  , (1,"LoadChunk")
+  ]
+
+enum "BlockId" "UnknownBlock" blocks
+
+enum16 "ItemId" "OtherItem"   items
 
 
 mapchunkDataGet :: Get (Maybe (Int8,Int8,Int8,[BlockId],ByteString,ByteString,ByteString))
@@ -153,7 +149,7 @@ mapchunkDataGet =
 
 
 putMaybe16 :: (a -> Put) -> Maybe a -> Put
-putMaybe16 p Nothing = putJ( -1 :: Int16)
+putMaybe16 _ Nothing = putJ( -1 :: Int16)
 putMaybe16 p (Just x) = p x
 
 getMaybe16 :: Get a -> Get (Maybe a)

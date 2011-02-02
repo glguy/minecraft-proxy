@@ -2,14 +2,11 @@
 module Generator  where
 
 import Language.Haskell.TH
-import Language.Haskell.TH.Lib
 import Control.Monad
 import Data.List (partition)
 import Data.Maybe (isJust)
-import Data.Binary
 
 import Data.Int
-import Data.Word
 import JavaBinary
 
 data Member = Member
@@ -24,6 +21,8 @@ data Field = Field
   , fieldPut  :: ExpQ
   }
 
+-- | 'addField' is used to add a new custom field to the end of a member.
+addField :: Member -> Field -> Member
 addField member field = member { memberFields = memberFields member ++ [field] }
 
 standardField :: TypeQ -> Field
@@ -47,16 +46,21 @@ def ty name = Member
   , memberFields = [standardField ty]
   }
 
+con0 :: Integer -> String -> Member
 con0 tag name = con tag name []
 
+con' :: Integer -> String -> [Name] -> Member
 con' tag name memberNames = con tag name (map conT memberNames)
 
+enum :: String -> String -> [(Integer, String)] -> Q [Dec]
 enum name defaultName xs = packetData name $ [con0 tag n | (tag,n) <- xs]
                                           ++ [def [t|Int8|] defaultName]
 
+enum16 :: String -> String -> [(Integer, String)] -> Q [Dec]
 enum16 name defaultName xs = packetData' name [t|Int16|] $ [con0 tag n | (tag,n) <- xs] 
                                                       ++ [def [t|Int16|] defaultName]
 
+packetData :: String -> [Member] -> Q [Dec]
 packetData typeName members = packetData' typeName [t|Int8|] members
 
 packetData' :: String -> TypeQ -> [Member] -> Q [Dec]
@@ -83,7 +87,7 @@ putClause tagType member =
   
      let putTag = case memberTag member of
             Nothing -> []
-            Just t  -> [[| putJ (fromIntegral t :: $(tagType)) |]]
+            Just t  -> [[| putJ (fromInteger t :: $(tagType)) |]]
 
      let body = doE . map noBindS
               $ putTag ++ [ [| $(fieldPut field) $(varE n) |]

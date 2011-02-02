@@ -8,7 +8,6 @@ import Control.Exception
 import Control.Monad
 import Data.Array.IO
 import Data.Binary.Put (runPut)
-import Data.Bits
 import Data.ByteString.Lazy (ByteString)
 import Data.Foldable
 import Data.IORef
@@ -18,7 +17,6 @@ import Data.Map (Map)
 import Data.Maybe (fromMaybe,mapMaybe)
 import Data.Set (Set)
 import Data.Traversable (for)
-import Data.Word
 import Network.Socket hiding (send)
 import Network.Socket.ByteString.Lazy
 import Prelude hiding (getContents, catch)
@@ -29,7 +27,6 @@ import System.IO hiding (getContents)
 import qualified Data.ByteString.Lazy as L
 import qualified Data.Map as Map
 import qualified Data.Set as Set
-import qualified Network
 
 import GameState
 import JavaBinary
@@ -66,6 +63,7 @@ data Configuration = Config
   , configConsoleFile :: Maybe String
   , configHelp :: Bool }
 
+defaultConfig :: Configuration
 defaultConfig = Config
   { listenHost = Nothing
   , listenPort = "25565"
@@ -193,10 +191,10 @@ inboundLogic clientChan state msg = do
   let msg' = case msg of
                Mapchunk x y z (Just (sx, sy, sz, bs, a, b, c))
                  | glass -> Mapchunk x y z (Just (sx, sy, sz, map makeGlass bs, a, b, c))
-               Mapchunk x y z Nothing -> Chat "Bad map chunk"
-               TimeUpdate t -> case time of
+               Mapchunk _ _ _ Nothing -> Chat "Bad map chunk"
+               TimeUpdate {} -> case time of
                  Nothing -> msg
-                 Just t' -> TimeUpdate t'
+                 Just t -> TimeUpdate t
                _ -> msg
 
   -- Update compass
@@ -245,7 +243,7 @@ processCommand clientChan state text
               *> tellPlayer clientChan "Time fixed"
       _ -> tellPlayer clientChan "Unable to parse time"
 
-processCommand clientChan state text
+processCommand clientChan _ text
   | "echo " `isPrefixOf` text
   = case reads (drop 5 text) of
       [(msg,_)] -> sendMessages clientChan [msg]
@@ -338,7 +336,7 @@ outboundLogic clientChan serverChan state msg = do
       attacked <- glassAttack clientChan state x y z
       return $ if attacked then [] else [msg]
 
-    PlayerBlockPlacement x y z None (Just (Compass, _, _)) -> do
+    PlayerBlockPlacement _ _ _ None (Just (Compass, _, _)) -> do
        restoreMap <- swapMVar (restoreVar state) Map.empty
        bm <- blockMap <$> readMVar (gameState state)
        msgs <- makeRestore bm restoreMap
@@ -492,7 +490,7 @@ digShift x y z face i = case face of
   Y2 -> (x,y-i',z)
   Z1 -> (x,y,z+i')
   Z2 -> (x,y,z-i')
-  None -> (x,y,z)
+  _  -> (x,y,z)
 
  where i' :: Num a => a
        i' = fromIntegral i
@@ -562,8 +560,6 @@ waitThreadGroup xs = do
                                           \ (SomeException e) -> print e >> putMVar var ()
   takeMVar var
   traverse_ killThread threadIds
-  where
-  n = length xs
 
 
 -- Networking Helpers
@@ -602,6 +598,7 @@ usageText =
   \\n\
   \example: minecraft-proxy -l localhost -p 2000 example.com\n"
 
+getOptions :: IO (String, String, Configuration)
 getOptions = do
   (fs, args, errs) <- getOpt Permute options <$> getArgs
   let config = foldl' (\ c f -> f c) defaultConfig fs
@@ -625,8 +622,9 @@ getOptions = do
 
 -- External command echo support
 
+makePipeListener :: Chan ByteString -> FilePath -> IO ()
 makePipeListener clientChan consoleFile =
-  do forkIO $ do
+  do _ <- forkIO $ do
        xs <- lines <$> readFile consoleFile
        tellPlayer clientChan "Console opened"
        traverse_ process xs

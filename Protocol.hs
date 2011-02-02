@@ -1,21 +1,14 @@
-{-# LANGUAGE TupleSections #-}
-{-# LANGUAGE GeneralizedNewtypeDeriving #-}
 {-# LANGUAGE TemplateHaskell #-}
 module Protocol where
 
 import Control.Applicative
 import Control.Monad
 import Data.Binary.Get
-import Data.Binary.Put
 import Data.Bits
 import Data.ByteString.Lazy (ByteString)
 import Data.Foldable
 import Data.Int
-import Data.Word
-import Debug.Trace
 import Network.Socket (ServiceName)
-import qualified Data.ByteString.Lazy as L
-import qualified Data.ByteString.Lazy.Internal as LI
 
 import JavaBinary
 import Generator
@@ -24,109 +17,6 @@ import Language.Haskell.TH
 
 defaultMinecraftPort :: ServiceName
 defaultMinecraftPort = "25565"
-
-
-type MessageTag = Int8
-type ChunkLoc = (Int32, Int32)
-
-newtype EntityId = EID Int32
-  deriving (Eq, Ord, Show,Read,JavaBinary)
-
-newtype SlotId = SID Int16
-  deriving (Eq, Ord, Show,Read,JavaBinary)
-
-newtype WindowId = WID Int8
-  deriving (Eq, Ord, Show,Read,JavaBinary)
-
-newtype TransactionId = TID Int16
-  deriving (Eq, Ord, Show,Read,JavaBinary)
-
-newtype ProgressBarId = PID Int16
-  deriving (Eq, Ord, Show,Read,JavaBinary)
-
-newtype GraphicId = GID Int32
-  deriving (Eq, Ord, Show,Read,JavaBinary)
-
-enum "InstrumentType"
-  "OtherInstrument"
-  [ (0, "Harp"       )
-  , (1, "DoubleBass" )
-  , (2, "SnareDrum"  )
-  , (3, "Sticks"     )
-  , (4, "BassDrum"   )
-  ]
-
-enum "Face"
-  "UnknownFace"
-  [ (-1,"None")
-  , (0,"Y1")
-  , (1,"Y2")
-  , (2,"Z1")
-  , (3,"Z2")
-  , (4,"X1")
-  , (5,"X2")
-  ]
-
-enum "MobId"
-  "OtherMob"
-  [ (50, "Creeper")
-  , (51, "Skeleton")
-  , (52, "Spider")
-  , (53, "GiantSpider")
-  , (54, "Zombie")
-  , (55, "Slime")
-  , (56, "Ghast")
-  , (57, "ZombiePigman")
-  , (90, "Pig")
-  , (91, "Sheep")
-  , (92, "Cow")
-  , (93, "Hen")
-  , (94, "Squid")
-  ]
-
-enum "EntityStatus"
-  "OtherStatus"
-  [ (2,"Damaged")
-  , (3,"Died")
-  ]
-
-enum "InventoryType"
-  "UnknownInventory"
-  [ (0,"BasicInventory")
-  , (1,"WorkbenchInventory")
-  , (2,"FurnaceInventory")
-  , (3,"DispenserInventory")
-  ]
-
-enum "Action"
-  "ActionOther"
-  [ (1,"ActionCrouch")
-  , (2,"ActionUncrouch")
-  ]
-
-enum "Animate"
-  "OtherAnimate"
-  [ (0,"NoAnimate")
-  , (1,"SwingArm")
-  , (2,"DamageAnimation")
-  , (104,"Crouch")
-  , (105,"Uncrouch")
-  ]
-
-enum "DiggingStatus"
-  "OtherDigging"
-  [ (0,"StartedDigging")
-  , (1,"Digging")
-  , (2,"StoppedDigging")
-  , (3,"BlockBroken")
-  , (4,"DropItem")
-  ]
-
-enum "PrechunkStatus"
-  "OtherPrechunk"
-  [ (0,"UnloadChunk")
-  , (1,"LoadChunk")
-  ]
 
 data Metadata = Metadata [(Int8, MetadataEntry)]
  deriving (Show, Read, Eq)
@@ -160,7 +50,7 @@ instance JavaBinary Metadata where
           return ((ix,x) : xs)
 
   putJ (Metadata xs) = traverse_ aux xs *> putJ (127 :: Int8)
-    where putTag fieldType ix = putJ (fieldType `shiftL` 5 .|. ix .&. 0x1f)
+    where putTag ty ix = putJ (ty `shiftL` 5 .|. ix .&. 0x1f)
           aux (ix, MetadataByte   x) = putTag 0 ix *> putJ x
           aux (ix, MetadataShort  x) = putTag 1 ix *> putJ x
           aux (ix, MetadataInt    x) = putTag 2 ix *> putJ x
@@ -181,7 +71,6 @@ packetData "Message"
       ,''Int64  --  Map Seed
       ,''Int8   --  Dimension
       ]
-
   , con' 0x02 "Handshake"
       [''String --  Session ID
       ]
@@ -384,10 +273,10 @@ packetData "Message"
   , con' 0x34 "MultiblockChange"
      [''ChunkLoc
      ] `addField`
-     Field { fieldType = strictType isStrict [t|[(BlockLoc, BlockId, Int8)]|] --  Coordinate, Block type, Meta
+     Field { fieldType = strictType isStrict [t|[(BlockLoc, BlockId, Int8)]|]
            , fieldGet = [| getChanges |]
            , fieldPut = [| putChanges |]
-           }
+           } --  Coordinate, Block type, Meta
   , con' 0x35 "BlockChange"
       [''Int32 --  Block X
       ,''Int8  --  Block Y
@@ -408,10 +297,10 @@ packetData "Message"
      ,''Double --  Z
      ,''Float  --  Radius?
      ] `addField`
-     Field { fieldType = strictType isStrict [t|[(Int8,Int8,Int8)]|] --  Relative X,Y,Z of affected blocks
+     Field { fieldType = strictType isStrict [t|[(Int8,Int8,Int8)]|]
            , fieldGet = [| getCoords |]
            , fieldPut = [| putCoords |]
-           }
+           } --  Relative X,Y,Z of affected blocks
   , con' 0x64 "OpenWindow"
       [''WindowId
       ,''InventoryType
