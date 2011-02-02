@@ -254,19 +254,16 @@ $(packetData "Message"
       ,''Int32 --  Z
       ,''Face
       ]
-  , Member { memberTag = Just 0x0f
-           , memberName = mkName "PlayerBlockPlacement"
-           , memberFields =
-               [standardField [t|Int32|] --  X
-               ,standardField [t|Int8 |] --  Y
-               ,standardField [t|Int32|] --  Z
-               ,standardField [t|Face |]
-               ,Field { fieldType = strictType isStrict [t|Maybe (ItemId, Int8, Int16)|]
-                      , fieldGet  = [|getMaybe16 getJ|]
-                      , fieldPut  = \n -> [|putMaybe16 putJ $(n)|]
-                      } --  Optional block, count, and use
-               ]
-           }
+  , con' 0x0f "PlayerBlockPlacement"
+      [''Int32 --  X
+      ,''Int8  --  Y
+      ,''Int32 --  Z
+      ,''Face 
+      ] `addField`
+      Field { fieldType = strictType isStrict [t|Maybe (ItemId, Int8, Int16)|]
+            , fieldGet  = [|getMaybe16 getJ|]
+            , fieldPut  = \n -> [|putMaybe16 putJ $(n)|]
+            } --  Optional block, count, and use
   , con' 0x10 "HoldingChange"
       [''SlotId
       ]
@@ -384,31 +381,25 @@ $(packetData "Message"
      [''ChunkLoc
      ,''PrechunkStatus
      ]
-  , Member
-     { memberName = mkName "Mapchunk"
-     , memberTag  = Just 0x33
-     , memberFields = map (standardField . conT)
-             [''Int32 --  X
-             ,''Int16 --  Y
-             ,''Int32 --  Z
-             ] ++ [
-               Field { fieldType = strictType isStrict [t|( Int8, Int8, Int8, [BlockId]
+  , con' 0x33 "Mapchunk"
+     [''Int32 --  X
+     ,''Int16 --  Y
+     ,''Int32 --  Z
+     ] `addField`
+     Field { fieldType = strictType isStrict [t|( Int8, Int8, Int8, [BlockId]
                                       , ByteString
                                       , ByteString
                                       , ByteString)|]
-                     , fieldGet = [| mapchunkDataGet |]
-                     , fieldPut = \n -> [| mapchunkDataPut $(n) |]
-                     }
-             ] }
-
-  , Member
-      { memberName = mkName "MultiblockChange"
-      , memberTag  = Just 0x34
-      , memberFields = [standardField [t|ChunkLoc|]
-                       , Field { fieldType = strictType isStrict [t|[(BlockLoc, BlockId, Int8)]|] --  Coordinate, Block type, Meta
-                       , fieldGet = [| getChanges |]
-                       , fieldPut = \n -> [| putChanges $(n)  |] } ] }
-
+           , fieldGet = [| mapchunkDataGet |]
+           , fieldPut = \n -> [| mapchunkDataPut $(n) |]
+           }
+  , con' 0x34 "MultiblockChange"
+     [''ChunkLoc
+     ] `addField`
+     Field { fieldType = strictType isStrict [t|[(BlockLoc, BlockId, Int8)]|] --  Coordinate, Block type, Meta
+           , fieldGet = [| getChanges |]
+           , fieldPut = \n -> [| putChanges $(n)  |]
+           }
   , con' 0x35 "BlockChange"
       [''Int32 --  Block X
       ,''Int8  --  Block Y
@@ -423,19 +414,16 @@ $(packetData "Message"
       ,''InstrumentType
       ,''Int8  --  Pitch
       ]
-  , Member { memberName = mkName "Explosion"
-           , memberTag  = Just 0x3c
-           , memberFields = map (standardField . conT)
-                            [''Double --  X
-                            ,''Double --  Y
-                            ,''Double --  Z
-                            ,''Float  --  Radius?
-                            ] ++ [
-             Field { fieldType = strictType isStrict [t|[(Int8,Int8,Int8)]|] --  Relative X,Y,Z of affected blocks
-                   , fieldGet = [| getCoords |]
-                   , fieldPut = \n -> [| putCoords $(n) |]
-                   } ] }
-
+  , con' 0x3c "Explosion"
+     [''Double --  X
+     ,''Double --  Y
+     ,''Double --  Z
+     ,''Float  --  Radius?
+     ] `addField`
+     Field { fieldType = strictType isStrict [t|[(Int8,Int8,Int8)]|] --  Relative X,Y,Z of affected blocks
+           , fieldGet = [| getCoords |]
+           , fieldPut = \n -> [| putCoords $(n) |]
+           }
   , con' 0x64 "OpenWindow"
       [''WindowId
       ,''InventoryType
@@ -445,44 +433,34 @@ $(packetData "Message"
   , con' 0x65 "CloseWindow"
       [''WindowId
       ]
-  , Member { memberTag = Just 0x66
-           , memberName = mkName "WindowClick"
-           , memberFields = map (standardField . conT)
-                            [''WindowId
-                            ,''SlotId
-                            ,''Bool --  Right-click
-                            ,''TransactionId
-                            ] ++ [
-                Field { fieldType = strictType isStrict [t|Maybe (ItemId, Int8, Int16)|]
-                      , fieldGet  = [|getMaybe16 getJ|]
-                      , fieldPut  = \n -> [|putMaybe16 putJ $(n)|]
-                      } --  Optional block, count, and use
-                ]}
-  , Member { memberTag = Just 0x67
-           , memberName = mkName "SetSlot"
-           , memberFields = map (standardField . conT)
-                            [''WindowId
-                            ,''SlotId
-                            ] ++ [
-                Field { fieldType = strictType isStrict [t|Maybe (ItemId, Int8, Int16)|]
-                      , fieldGet  = [|getMaybe16 getJ|]
-                      , fieldPut  = \n -> [|putMaybe16 putJ $(n)|]
-                      } --  Optional block, count, and use
-                ]}
-  , Member { memberTag = Just 0x68
-           , memberName = mkName "WindowItems"
-           , memberFields = map (standardField . conT)
-                            [''WindowId
-                            ] ++ [
-                Field { fieldType = strictType isStrict [t|[Maybe (ItemId, Int8, Int16)]|]
-                      , fieldGet  = [|do n <- getJ :: Get Int16
-                                         replicateM (fromIntegral n) (getMaybe16 getJ)|]
-                      , fieldPut  = \n -> [| do let xs = $(n)
-                                                putJ (fromIntegral (length xs) :: Int16)
-                                                traverse_ (putMaybe16 putJ) xs|]
-                      } --  Optional block, count, and use
-                ]}
-
+  , con' 0x66 "WindowClick"
+      [''WindowId
+      ,''SlotId
+      ,''Bool --  Right-click
+      ,''TransactionId
+      ] `addField`
+      Field { fieldType = strictType isStrict [t|Maybe (ItemId, Int8, Int16)|]
+            , fieldGet  = [|getMaybe16 getJ|]
+            , fieldPut  = \n -> [|putMaybe16 putJ $(n)|]
+            } --  Optional block, count, and use
+  , con' 0x67 "SetSlot"
+      [''WindowId
+      ,''SlotId
+      ] `addField`
+      Field { fieldType = strictType isStrict [t|Maybe (ItemId, Int8, Int16)|]
+            , fieldGet  = [|getMaybe16 getJ|]
+            , fieldPut  = \n -> [|putMaybe16 putJ $(n)|]
+            } --  Optional block, count, and use
+  , con' 0x68 "WindowItems"
+      [''WindowId
+      ] `addField`
+      Field { fieldType = strictType isStrict [t|[Maybe (ItemId, Int8, Int16)]|]
+            , fieldGet  = [|do n <- getJ :: Get Int16
+                               replicateM (fromIntegral n) (getMaybe16 getJ)|]
+            , fieldPut  = \n -> [| do let xs = $(n)
+                                      putJ (fromIntegral (length xs) :: Int16)
+                                      traverse_ (putMaybe16 putJ) xs|]
+            } --  Optional block, count, and use
   , con' 0x69 "UpdateProgressBar"
       [''WindowId
       ,''ProgressBarId

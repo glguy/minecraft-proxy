@@ -23,6 +23,8 @@ data Field = Field
   , fieldPut  :: ExpQ -> ExpQ
   }
 
+addField member field = member { memberFields = memberFields member ++ [field] }
+
 standardField :: TypeQ -> Field
 standardField ty = Field
   { fieldType = strictType isStrict ty
