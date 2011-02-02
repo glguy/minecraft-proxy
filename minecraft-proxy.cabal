@@ -63,6 +63,7 @@ Executable minecraft-proxy
                        containers,
                        data-binary-ieee754,
                        network == 2.3.*,
+                       template-haskell,
                        utf8-string,
                        zlib == 0.5.3.*
   

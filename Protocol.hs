@@ -1,5 +1,6 @@
 {-# LANGUAGE TupleSections #-}
 {-# LANGUAGE GeneralizedNewtypeDeriving #-}
+{-# LANGUAGE TemplateHaskell #-}
 module Protocol where
 
 import Codec.Compression.Zlib
@@ -19,6 +20,7 @@ import qualified Data.ByteString.Lazy as L
 import qualified Data.ByteString.Lazy.Internal as LI
 
 import JavaBinary
+import Generator
 
 defaultMinecraftPort :: ServiceName
 defaultMinecraftPort = "25565"
@@ -48,6 +50,169 @@ newtype ProgressBarId = PID Int16
 
 newtype GraphicId = GID Int32
   deriving (Eq, Ord, Show,Read,JavaBinary)
+
+$(enum "InstrumentType"
+  "OtherInstrument"
+  [ (0, "Harp"       )
+  , (1, "DoubleBass" )
+  , (2, "SnareDrum"  )
+  , (3, "Sticks"     )
+  , (4, "BassDrum"   )
+  ])
+
+$(enum "Face"
+  "UnknownFace"
+  [ (-1,"None")
+  , (0,"Y1")
+  , (1,"Y2")
+  , (2,"Z1")
+  , (3,"Z2")
+  , (4,"X1")
+  , (5,"X2")
+  ])
+
+$(enum "MobId"
+  "OtherMob"
+  [ (50, "Creeper")
+  , (51, "Skeleton")
+  , (52, "Spider")
+  , (53, "GiantSpider")
+  , (54, "Zombie")
+  , (55, "Slime")
+  , (56, "Ghast")
+  , (57, "ZombiePigman")
+  , (90, "Pig")
+  , (91, "Sheep")
+  , (92, "Cow")
+  , (93, "Hen")
+  , (94, "Squid")
+  ])
+
+$(enum "EntityStatus"
+  "OtherStatus"
+  [ (2,"Damaged")
+  , (3,"Died")
+  ])
+
+$(enum "InventoryType"
+  "UnknownInventory"
+  [ (0,"BasicInventory")
+  , (1,"WorkbenchInventory")
+  , (2,"FurnaceInventory")
+  , (3,"DispenserInventory")
+  ]) 
+
+$(enum "BlockId"
+  "UnknownBlock"
+  [ (0x00,"Air")
+  , (0x01,"Stone")
+  , (0x02,"Grass")
+  , (0x03,"Dirt")
+  , (0x04,"Cobblestone")
+  , (0x05,"WoodenPlank")
+  , (0x06,"Sapling")
+  , (0x07,"Bedrock")
+  , (0x08,"Water")
+  , (0x09,"StationaryWater")
+  , (0x0A,"Lava")
+  , (0x0B,"StationaryLava")
+  , (0x0C,"Sand")
+  , (0x0D,"Gravel")
+  , (0x0E,"Goldore")
+  , (0x0F,"Ironore")
+  , (0x10,"Coalore")
+  , (0x11,"Wood")
+  , (0x12,"Leaves")
+  , (0x13,"Sponge")
+  , (0x14,"Glass")
+  , (0x15,"LapisLazuliOre")
+  , (0x16,"LapisLazuliBlock")
+  , (0x17,"Dispenser")
+  , (0x18,"Sandstone")
+  , (0x19,"NoteBlock")
+  , (0x23,"Wool")
+  , (0x25,"YellowFlower")
+  , (0x26,"RedRose")
+  , (0x27,"BrownMushroom")
+  , (0x28,"RedMushroom")
+  , (0x29,"GoldBlock")
+  , (0x2A,"IronBlock")
+  , (0x2B,"DoubleStoneSlab")
+  , (0x2C,"StoneSlab")
+  , (0x2D,"Brick")
+  , (0x2E,"TNT")
+  , (0x2F,"Bookshelf")
+  , (0x30,"MossStone")
+  , (0x31,"Obsidian")
+  , (0x32,"Torch")
+  , (0x33,"Fire")
+  , (0x34,"MonsterSpawner")
+  , (0x35,"WoodenStairs")
+  , (0x36,"Chest")
+  , (0x37,"RedstoneWire")
+  , (0x38,"DiamondOre")
+  , (0x39,"DiamondBlock")
+  , (0x3A,"Workbench")
+  , (0x3B,"Crops")
+  , (0x3C,"Soil")
+  , (0x3D,"Furnace")
+  , (0x3E,"BurningFurnace")
+  , (0x3F,"SignPost")
+  , (0x40,"WoodenDoor")
+  , (0x41,"Ladder")
+  , (0x42,"MinecartTracks")
+  , (0x43,"CobblestoneStairs")
+  , (0x44,"WallSign")
+  , (0x45,"Lever")
+  , (0x46,"StonePressurePlate")
+  , (0x47,"IronDoor")
+  , (0x48,"WoodenPressurePlate")
+  , (0x49,"RedstoneOre")
+  , (0x4A,"GlowingRedstoneOre")
+  , (0x4B,"RedstoneTorchOff")
+  , (0x4C,"RedstoneTorchOn")
+  , (0x4D,"StoneButton")
+  , (0x4E,"Snow")
+  , (0x4F,"Ice")
+  , (0x50,"SnowBlock")
+  , (0x51,"Cactus")
+  , (0x52,"Clay")
+  , (0x53,"SugarCane")
+  , (0x54,"Jukebox")
+  , (0x55,"Fence")
+  , (0x56,"Pumpkin")
+  , (0x57,"Netherrack")
+  , (0x58,"SoulSand")
+  , (0x59,"Glowstone")
+  , (0x5A,"Portal")
+  , (0x5B,"JackOLantern")
+  , (0x5C,"Cake")
+  ])
+
+$(enum "Action"
+  "ActionOther"
+  [ (1,"ActionCrouch")
+  , (2,"ActionUncrouch")
+  ])
+
+$(enum "Animate"
+  "OtherAnimate"
+  [ (0,"NoAnimate")
+  , (1,"SwingArm")
+  , (2,"DamageAnimation")
+  , (104,"Crouch")
+  , (105,"Uncrouch")
+  ])
+
+$(enum "DiggingStatus"
+  "OtherDigging"
+  [ (0,"StartedDigging")
+  , (1,"Digging")
+  , (2,"StoppedDigging")
+  , (3,"BlockBroken")
+  , (4,"DropItem")
+  ])
+
 
 data Message
 
@@ -312,389 +477,6 @@ instance JavaBinary PrechunkStatus where
   putJ UnloadChunk = putJ (0 :: Int8)
   putJ LoadChunk   = putJ (1 :: Int8)
 
-data EntityStatus
-  = Damaged
-  | Died
-  | OtherStatus Int8
-  deriving (Read, Show, Eq)
-
-instance JavaBinary EntityStatus where
-  getJ = do
-    tag <- getJ
-    return $! case tag of
-      2 -> Damaged
-      3 -> Died
-      _ -> trace ("Unknown status " ++ show tag) (OtherStatus tag)
-
-  putJ Damaged = putJ (2 :: Int8)
-  putJ Died = putJ (3 :: Int8)
-  putJ (OtherStatus tag) = putJ tag
-
-data InstrumentType
-  = Harp
-  | DoubleBass
-  | SnareDrum
-  | Sticks
-  | BassDrum
-  | OtherInstrument Int8
-  deriving (Show, Read)
-
-instance JavaBinary InstrumentType where
-  getJ = do
-    tag <- getJ
-    return $! case tag of
-      0 -> Harp
-      1 -> DoubleBass
-      2 -> SnareDrum
-      3 -> Sticks
-      4 -> BassDrum
-      _ -> trace ("Unknown instrument " ++ show tag) (OtherInstrument tag)
-
-  putJ Harp                  = putJ (0 :: Int8)
-  putJ DoubleBass            = putJ (1 :: Int8)
-  putJ SnareDrum             = putJ (2 :: Int8)
-  putJ Sticks                = putJ (3 :: Int8)
-  putJ BassDrum              = putJ (4 :: Int8)
-  putJ (OtherInstrument tag) = putJ tag
-
-data InventoryType
-  = BasicInventory
-  | WorkbenchInventory
-  | FurnaceInventory
-  | DispenserInventory
-  | UnknownInventory Int8
-  deriving (Show, Read)
-
-instance JavaBinary InventoryType where
-  getJ = do
-    tag <- getJ
-    return $! case tag :: Int8 of
-      0 -> BasicInventory
-      1 -> WorkbenchInventory
-      2 -> FurnaceInventory
-      3 -> DispenserInventory
-      _ -> trace ("Unknown inventory " ++ show tag) (UnknownInventory tag)
-
-  putJ BasicInventory     = putJ (0 :: Int8)
-  putJ WorkbenchInventory = putJ (1 :: Int8)
-  putJ FurnaceInventory   = putJ (2 :: Int8)
-  putJ DispenserInventory = putJ (3 :: Int8)
-  putJ (UnknownInventory tag) = putJ tag
-
-
-data MobId
-  = Creeper
-  | Skeleton
-  | Spider
-  | GiantSpider
-  | Zombie
-  | Slime
-  | Ghast
-  | ZombiePigman
-  | Pig
-  | Sheep
-  | Cow
-  | Hen
-  | Squid
-  | OtherMob Int8
-  deriving (Show, Read, Eq)
-
-instance JavaBinary MobId where
-
-  getJ = do
-    tag <- getJ
-    return $! case tag of
-      50 -> Creeper
-      51 -> Skeleton
-      52 -> Spider
-      53 -> GiantSpider
-      54 -> Zombie
-      55 -> Slime
-      56 -> Ghast
-      57 -> ZombiePigman
-      90 -> Pig
-      91 -> Sheep
-      92 -> Cow
-      93 -> Hen
-      94 -> Squid
-      _  -> trace ("Unknown mob " ++ show tag) (OtherMob tag)
-  putJ Creeper        = putJ (50 :: Int8)
-  putJ Skeleton       = putJ (51 :: Int8)
-  putJ Spider         = putJ (52 :: Int8)
-  putJ GiantSpider    = putJ (53 :: Int8)
-  putJ Zombie         = putJ (54 :: Int8)
-  putJ Slime          = putJ (55 :: Int8)
-  putJ Ghast          = putJ (56 :: Int8)
-  putJ ZombiePigman   = putJ (57 :: Int8)
-  putJ Pig            = putJ (90 :: Int8)
-  putJ Sheep          = putJ (91 :: Int8)
-  putJ Cow            = putJ (92 :: Int8)
-  putJ Hen            = putJ (93 :: Int8)
-  putJ Squid          = putJ (94 :: Int8)
-  putJ (OtherMob tag) = putJ (tag :: Int8)
-
-data BlockId
-  = Air
-  | Stone
-  | Grass
-  | Dirt
-  | Cobblestone
-  | WoodenPlank
-  | Sapling
-  | Bedrock
-  | Water
-  | StationaryWater
-  | Lava
-  | StationaryLava
-  | Sand
-  | Gravel
-  | Goldore
-  | Ironore
-  | Coalore
-  | Wood
-  | Leaves
-  | Sponge
-  | Glass
-  | LapisLazuliOre
-  | LapisLazuliBlock
-  | Dispenser
-  | Sandstone
-  | NoteBlock
-  | Wool
-  | YellowFlower
-  | RedRose
-  | BrownMushroom
-  | RedMushroom
-  | GoldBlock
-  | IronBlock
-  | DoubleStoneSlab
-  | StoneSlab
-  | Brick
-  | TNT
-  | Bookshelf
-  | MossStone
-  | Obsidian
-  | Torch
-  | Fire
-  | MonsterSpawner
-  | WoodenStairs
-  | Chest
-  | RedstoneWire
-  | DiamondOre
-  | DiamondBlock
-  | Workbench
-  | Crops
-  | Soil
-  | Furnace
-  | BurningFurnace
-  | SignPost
-  | WoodenDoor
-  | Ladder
-  | MinecartTracks
-  | CobblestoneStairs
-  | WallSign
-  | Lever
-  | StonePressurePlate
-  | IronDoor
-  | WoodenPressurePlate
-  | RedstoneOre
-  | GlowingRedstoneOre
-  | RedstoneTorchOff
-  | RedstoneTorchOn
-  | StoneButton
-  | Snow
-  | Ice
-  | SnowBlock
-  | Cactus
-  | Clay
-  | SugarCane
-  | Jukebox
-  | Fence
-  | Pumpkin
-  | Netherrack
-  | SoulSand
-  | Glowstone
-  | Portal
-  | JackOLantern
-  | Cake
-  | UnknownBlock Int8
-     deriving (Show, Read, Eq)
-
-instance JavaBinary BlockId where
-  getJ = do
-    tag <- getJ
-    return $!
-     case tag :: Int8 of
-      0x00 -> Air
-      0x01 -> Stone
-      0x02 -> Grass
-      0x03 -> Dirt
-      0x04 -> Cobblestone
-      0x05 -> WoodenPlank
-      0x06 -> Sapling
-      0x07 -> Bedrock
-      0x08 -> Water
-      0x09 -> StationaryWater
-      0x0A -> Lava
-      0x0B -> StationaryLava
-      0x0C -> Sand
-      0x0D -> Gravel
-      0x0E -> Goldore
-      0x0F -> Ironore
-      0x10 -> Coalore
-      0x11 -> Wood
-      0x12 -> Leaves
-      0x13 -> Sponge
-      0x14 -> Glass
-      0x15 -> LapisLazuliOre
-      0x16 -> LapisLazuliBlock
-      0x17 -> Dispenser
-      0x18 -> Sandstone
-      0x19 -> NoteBlock
-      0x23 -> Wool
-      0x25 -> YellowFlower
-      0x26 -> RedRose
-      0x27 -> BrownMushroom
-      0x28 -> RedMushroom
-      0x29 -> GoldBlock
-      0x2A -> IronBlock
-      0x2B -> DoubleStoneSlab
-      0x2C -> StoneSlab
-      0x2D -> Brick
-      0x2E -> TNT
-      0x2F -> Bookshelf
-      0x30 -> MossStone
-      0x31 -> Obsidian
-      0x32 -> Torch
-      0x33 -> Fire
-      0x34 -> MonsterSpawner
-      0x35 -> WoodenStairs
-      0x36 -> Chest
-      0x37 -> RedstoneWire
-      0x38 -> DiamondOre
-      0x39 -> DiamondBlock
-      0x3A -> Workbench
-      0x3B -> Crops
-      0x3C -> Soil
-      0x3D -> Furnace
-      0x3E -> BurningFurnace
-      0x3F -> SignPost
-      0x40 -> WoodenDoor
-      0x41 -> Ladder
-      0x42 -> MinecartTracks
-      0x43 -> CobblestoneStairs
-      0x44 -> WallSign
-      0x45 -> Lever
-      0x46 -> StonePressurePlate
-      0x47 -> IronDoor
-      0x48 -> WoodenPressurePlate
-      0x49 -> RedstoneOre
-      0x4A -> GlowingRedstoneOre
-      0x4B -> RedstoneTorchOff
-      0x4C -> RedstoneTorchOn
-      0x4D -> StoneButton
-      0x4E -> Snow
-      0x4F -> Ice
-      0x50 -> SnowBlock
-      0x51 -> Cactus
-      0x52 -> Clay
-      0x53 -> SugarCane
-      0x54 -> Jukebox
-      0x55 -> Fence
-      0x56 -> Pumpkin
-      0x57 -> Netherrack
-      0x58 -> SoulSand
-      0x59 -> Glowstone
-      0x5A -> Portal
-      0x5B -> JackOLantern
-      0x5C -> Cake
-      _ -> trace ("Unknown block " ++ show tag) (UnknownBlock tag)
-
-  putJ Air                = putJ (0x00 :: Int8)
-  putJ Stone              = putJ (0x01 :: Int8)
-  putJ Grass              = putJ (0x02 :: Int8)
-  putJ Dirt               = putJ (0x03 :: Int8)
-  putJ Cobblestone        = putJ (0x04 :: Int8)
-  putJ WoodenPlank        = putJ (0x05 :: Int8)
-  putJ Sapling            = putJ (0x06 :: Int8)
-  putJ Bedrock            = putJ (0x07 :: Int8)
-  putJ Water              = putJ (0x08 :: Int8)
-  putJ StationaryWater    = putJ (0x09 :: Int8)
-  putJ Lava               = putJ (0x0A :: Int8)
-  putJ StationaryLava     = putJ (0x0B :: Int8)
-  putJ Sand               = putJ (0x0C :: Int8)
-  putJ Gravel             = putJ (0x0D :: Int8)
-  putJ Goldore            = putJ (0x0E :: Int8)
-  putJ Ironore            = putJ (0x0F :: Int8)
-  putJ Coalore            = putJ (0x10 :: Int8)
-  putJ Wood               = putJ (0x11 :: Int8)
-  putJ Leaves             = putJ (0x12 :: Int8)
-  putJ Sponge             = putJ (0x13 :: Int8)
-  putJ Glass              = putJ (0x14 :: Int8)
-  putJ LapisLazuliOre     = putJ (0x15 :: Int8)
-  putJ LapisLazuliBlock   = putJ (0x16 :: Int8)
-  putJ Dispenser          = putJ (0x17 :: Int8)
-  putJ Sandstone          = putJ (0x18 :: Int8)
-  putJ NoteBlock          = putJ (0x19 :: Int8)
-  putJ Wool               = putJ (0x23 :: Int8)
-  putJ YellowFlower       = putJ (0x25 :: Int8)
-  putJ RedRose            = putJ (0x26 :: Int8)
-  putJ BrownMushroom      = putJ (0x27 :: Int8)
-  putJ RedMushroom        = putJ (0x28 :: Int8)
-  putJ GoldBlock          = putJ (0x29 :: Int8)
-  putJ IronBlock          = putJ (0x2A :: Int8)
-  putJ DoubleStoneSlab    = putJ (0x2B :: Int8)
-  putJ StoneSlab          = putJ (0x2C :: Int8)
-  putJ Brick              = putJ (0x2D :: Int8)
-  putJ TNT                = putJ (0x2E :: Int8)
-  putJ Bookshelf          = putJ (0x2F :: Int8)
-  putJ MossStone          = putJ (0x30 :: Int8)
-  putJ Obsidian           = putJ (0x31 :: Int8)
-  putJ Torch              = putJ (0x32 :: Int8)
-  putJ Fire               = putJ (0x33 :: Int8)
-  putJ MonsterSpawner     = putJ (0x34 :: Int8)
-  putJ WoodenStairs       = putJ (0x35 :: Int8)
-  putJ Chest              = putJ (0x36 :: Int8)
-  putJ RedstoneWire       = putJ (0x37 :: Int8)
-  putJ DiamondOre         = putJ (0x38 :: Int8)
-  putJ DiamondBlock       = putJ (0x39 :: Int8)
-  putJ Workbench          = putJ (0x3A :: Int8)
-  putJ Crops              = putJ (0x3B :: Int8)
-  putJ Soil               = putJ (0x3C :: Int8)
-  putJ Furnace            = putJ (0x3D :: Int8)
-  putJ BurningFurnace     = putJ (0x3E :: Int8)
-  putJ SignPost           = putJ (0x3F :: Int8)
-  putJ WoodenDoor         = putJ (0x40 :: Int8)
-  putJ Ladder             = putJ (0x41 :: Int8)
-  putJ MinecartTracks     = putJ (0x42 :: Int8)
-  putJ CobblestoneStairs  = putJ (0x43 :: Int8)
-  putJ WallSign           = putJ (0x44 :: Int8)
-  putJ Lever              = putJ (0x45 :: Int8)
-  putJ StonePressurePlate = putJ (0x46 :: Int8)
-  putJ IronDoor           = putJ (0x47 :: Int8)
-  putJ WoodenPressurePlate= putJ (0x48 :: Int8)
-  putJ RedstoneOre        = putJ (0x49 :: Int8)
-  putJ GlowingRedstoneOre = putJ (0x4A :: Int8)
-  putJ RedstoneTorchOff   = putJ (0x4B :: Int8)
-  putJ RedstoneTorchOn    = putJ (0x4C :: Int8)
-  putJ StoneButton        = putJ (0x4D :: Int8)
-  putJ Snow               = putJ (0x4E :: Int8)
-  putJ Ice                = putJ (0x4F :: Int8)
-  putJ SnowBlock          = putJ (0x50 :: Int8)
-  putJ Cactus             = putJ (0x51 :: Int8)
-  putJ Clay               = putJ (0x52 :: Int8)
-  putJ SugarCane          = putJ (0x53 :: Int8)
-  putJ Jukebox            = putJ (0x54 :: Int8)
-  putJ Fence              = putJ (0x55 :: Int8)
-  putJ Pumpkin            = putJ (0x56 :: Int8)
-  putJ Netherrack         = putJ (0x57 :: Int8)
-  putJ SoulSand           = putJ (0x58 :: Int8)
-  putJ Glowstone          = putJ (0x59 :: Int8)
-  putJ Portal             = putJ (0x5A :: Int8)
-  putJ JackOLantern       = putJ (0x5B :: Int8)
-  putJ Cake               = putJ (0x5C :: Int8)
-  putJ (UnknownBlock tag) = putJ (tag :: Int8)
-
 data Metadata = Metadata [(Int8, MetadataEntry)]
  deriving (Show, Read)
 
@@ -735,99 +517,6 @@ instance JavaBinary Metadata where
           aux (ix, MetadataString x) = putTag 4 ix *> putJ x
           aux (ix, MetadataTriple x) = putTag 5 ix *> putJ x
 
-data Action
-  = ActionCrouch
-  | ActionUncrouch
-  | ActionOther Int8
-  deriving (Show, Read)
-
-instance JavaBinary Action where
-  getJ = do
-    tag <- getJ
-    return $! case tag of
-      1 -> ActionCrouch
-      2 -> ActionUncrouch
-      _ -> trace ("Unknown action " ++ show tag) (ActionOther tag)
-  putJ ActionCrouch      = putJ (1 :: Int8)
-  putJ ActionUncrouch    = putJ (2 :: Int8)
-  putJ (ActionOther tag) = putJ tag
-
-data Animate
-  = NoAnimate
-  | SwingArm
-  | DamageAnimation
-  | Crouch
-  | Uncrouch
-  | OtherAnimate Int8
-  deriving (Show, Read)
-
-instance JavaBinary Animate where
-  getJ = do
-    tag <- getJ
-    case tag of
-      0   -> return NoAnimate
-      1   -> return SwingArm
-      2   -> return DamageAnimation
-      104 -> return Crouch
-      105 -> return Uncrouch
-      _   -> return $ OtherAnimate tag
-  putJ NoAnimate          = putJ (0 :: Int8)
-  putJ SwingArm           = putJ (1 :: Int8)
-  putJ DamageAnimation    = putJ (2 :: Int8)
-  putJ Crouch             = putJ (104 :: Int8)
-  putJ Uncrouch           = putJ (105 :: Int8)
-  putJ (OtherAnimate tag) = putJ (tag :: Int8)
-
-data DiggingStatus
-  = StartedDigging
-  | Digging
-  | StoppedDigging
-  | BlockBroken
-  | DropItem
-  | OtherDigging Int8
-  deriving (Show, Read)
-
-instance JavaBinary DiggingStatus where
-  getJ = do
-    tag <- getJ
-    return $! case tag :: Int8 of
-      0 -> StartedDigging
-      1 -> Digging
-      2 -> StoppedDigging
-      3 -> BlockBroken
-      4 -> DropItem
-      _ -> trace ("Unknown digging status " ++ show tag) (OtherDigging tag)
-  putJ StartedDigging = putJ (0 :: Int8)
-  putJ Digging        = putJ (1 :: Int8)
-  putJ StoppedDigging = putJ (2 :: Int8)
-  putJ BlockBroken    = putJ (3 :: Int8)
-  putJ DropItem       = putJ (4 :: Int8)
-  putJ (OtherDigging tag) = putJ tag
-
-data Face
-  = Y1 | Y2 | Z1 | Z2 | X1 | X2 | None
-  deriving (Show, Read)
-
-instance JavaBinary Face where
-  getJ = do
-    tag <- getJ
-    return $! case tag :: Int8 of
-      -1 -> None
-      0 -> Y1
-      1 -> Y2
-      2 -> Z1
-      3 -> Z2
-      4 -> X1
-      5 -> X2
-      _ -> error ("Bad face " ++ show tag)
-
-  putJ None = putJ (-1 :: Int8)
-  putJ Y1   = putJ (0  :: Int8)
-  putJ Y2   = putJ (1  :: Int8)
-  putJ Z1   = putJ (2  :: Int8)
-  putJ Z2   = putJ (3  :: Int8)
-  putJ X1   = putJ (4  :: Int8)
-  putJ X2   = putJ (5  :: Int8)
 
 -- | Get a lazy ByteString prefixed with a 32-bit length.
 getLazyByteString32 :: Get ByteString
@@ -1292,3 +981,4 @@ proxyChat text = Chat $ "\194\167\&6" ++ text
 
 highlight :: String -> String
 highlight text = "\194\167\&b" ++ text
+

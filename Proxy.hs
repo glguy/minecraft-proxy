@@ -176,6 +176,11 @@ inboundLogic ::
   IO ()
 inboundLogic clientChan state msg = do
 
+  case msg of
+   WindowItems {} -> print msg
+   Transaction {} -> print msg
+   SetSlot     {} -> print msg
+   _ -> return ()
   -- Track entities
   changedEid <- modifyMVar (gameState state) $ \ gs -> do
     (change, gs') <- updateGameState msg gs
