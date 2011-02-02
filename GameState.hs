@@ -3,6 +3,7 @@ module GameState where
 import Data.Array.IO
 import Control.Applicative
 import Control.Monad
+import Data.Array
 import Data.ByteString.Lazy (ByteString)
 import qualified Data.ByteString.Lazy as L
 import Data.Map (Map)
@@ -84,8 +85,8 @@ updateGameState (SpawnPosition x y z) gs
 updateGameState (TimeUpdate t) gs
   = return (Nothing, gs { time = Just t })
 
-updateGameState (Mapchunk x y z (Just (sx, sy, sz, bs, ms, _, _))) gs
-  = do gs' <- updateBlockMap (setChunk x y z sx sy sz bs ms) gs
+updateGameState (Mapchunk (chunk, Just (blockArray, metas, _, _))) gs
+  = do gs' <- updateBlockMap (setChunk chunk blockArray metas) gs
        return (Nothing, gs')
 
 updateGameState (MultiblockChange chunkLoc changes) gs
@@ -101,32 +102,14 @@ updateGameState (Prechunk chunk UnloadChunk) gs
 updateGameState _ gs = return (Nothing, gs)
 
 
--- | 'decomposeCoords' computes the chunk coordinates and the
--- coordinates within that chunk.
-decomposeCoords ::
-  Int32 {- ^ X -} ->
-  Int8  {- ^ Y -} ->
-  Int32 {- ^ Z -} ->
-  (ChunkLoc, BlockLoc)
-decomposeCoords x y z = ((x `shiftR` 4
-                        ,z `shiftR` 4)
-                        ,(fromIntegral $ x .&. 0xf
-                        ,fromIntegral $ y .&. 0x7f
-                        ,fromIntegral $ z .&. 0xf)
-                        )
-
 setChunk ::
-  Int32 {- ^ starting X coordinate -} ->
-  Int16 {- ^ starting Y coordinate -} ->
-  Int32 {- ^ starting Z coordinate -} ->
-  Int8 {- ^ region X length -} ->
-  Int8 {- ^ region Y length -} ->
-  Int8 {- ^ region Z length -} ->
-  [BlockId] {- ^ block types -} ->
+  ChunkLoc ->
+  Array (Int8,Int8,Int8) BlockId {- ^ subchunk with relative indexes -} ->
   ByteString {- ^ block metadata -} ->
   BlockMap ->
   IO BlockMap
-setChunk x y z sx sy sz bs ms bm = do
+setChunk chunk changeArray ms bm = do
+  let ((bx,by,bz),(bx',by',bz')) = bounds changeArray
   (blockArray,metaArray,bm') <- case Map.lookup chunk bm of
                  Nothing -> do
                    blockArray <- newArray ((0,0,0),(0xf,0x7f,0xf)) Air
@@ -134,23 +117,18 @@ setChunk x y z sx sy sz bs ms bm = do
                    return (blockArray, metaArray, Map.insert chunk (blockArray, metaArray) bm)
                  Just (blockArray, metaArray) -> return (blockArray, metaArray, bm)
   
-  zipWithM_ (writeArray blockArray) coords bs
-  zipWithM_ (writeMetaData metaArray) (pairs coords) (L.unpack ms)
+  mapM_ (\ (ix, val) -> val `seq` writeArray blockArray ix val) (assocs changeArray)
+  let cs = coords bx by bz (bx' - bx) (by' - by) (bz' - bz)
+  zipWithM_ (writeMetaData metaArray) (pairs cs) (L.unpack ms)
   
   return bm'
   where
-  (chunk,(bx,by,bz)) = decomposeCoords x (fromIntegral y) z
   pairs (x1:x2:xs) = (x1,x2) : pairs xs
   pairs _ = []
 
   writeMetaData arr (x1,x2) m =  writeArray arr x2 (m `shiftR` 4)
                               *> writeArray arr x1 (m .&. 0xf)
 
-  coords = do -- The x z y order is intentional
-              x' <- take (fromIntegral sx + 1) [bx ..]
-              z' <- take (fromIntegral sz + 1) [bz ..]
-              y' <- take (fromIntegral sy + 1) [by ..]
-              return (x',y',z')
 
 -- | 'setBlocks' updates a number of blocks within a single chunk.
 setBlocks ::

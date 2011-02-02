@@ -3,6 +3,7 @@ module Protocol where
 
 import Control.Applicative
 import Control.Monad
+import Data.Array
 import Data.Binary.Get
 import Data.Bits
 import Data.ByteString.Lazy (ByteString)
@@ -259,14 +260,11 @@ packetData "Message"
      ,''PrechunkStatus
      ]
   , con' 0x33 "Mapchunk"
-     [''Int32 --  X
-     ,''Int16 --  Y
-     ,''Int32 --  Z
-     ] `addField`
-     Field { fieldType = strictType isStrict [t|Maybe (Int8, Int8, Int8, [BlockId]
+     [] `addField`
+     Field { fieldType = strictType isStrict [t|(ChunkLoc,Maybe (Array (Int8, Int8, Int8) BlockId
                                       , ByteString
                                       , ByteString
-                                      , ByteString)|]
+                                      , ByteString))|]
            , fieldGet = [| mapchunkDataGet |]
            , fieldPut = [| mapchunkDataPut |]
            }
