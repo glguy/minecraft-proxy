@@ -41,9 +41,6 @@ newtype WindowId = WID Int8
 newtype TransactionId = TID Int16
   deriving (Eq, Ord, Show,Read,JavaBinary)
 
-newtype ItemId = IID Int16
-  deriving (Eq, Ord, Show,Read,JavaBinary)
-
 newtype ProgressBarId = PID Int16
   deriving (Eq, Ord, Show,Read,JavaBinary)
 
@@ -253,7 +250,7 @@ packetData "Message"
       ] `addField`
       Field { fieldType = strictType isStrict [t|Maybe (ItemId, Int8, Int16)|]
             , fieldGet  = [|getMaybe16 getJ|]
-            , fieldPut  = \n -> [|putMaybe16 putJ $(n)|]
+            , fieldPut  = [|putMaybe16 putJ|]
             } --  Optional block, count, and use
   , con' 0x10 "HoldingChange"
       [''SlotId
@@ -382,14 +379,14 @@ packetData "Message"
                                       , ByteString
                                       , ByteString)|]
            , fieldGet = [| mapchunkDataGet |]
-           , fieldPut = \n -> [| mapchunkDataPut $(n) |]
+           , fieldPut = [| mapchunkDataPut |]
            }
   , con' 0x34 "MultiblockChange"
      [''ChunkLoc
      ] `addField`
      Field { fieldType = strictType isStrict [t|[(BlockLoc, BlockId, Int8)]|] --  Coordinate, Block type, Meta
            , fieldGet = [| getChanges |]
-           , fieldPut = \n -> [| putChanges $(n)  |]
+           , fieldPut = [| putChanges |]
            }
   , con' 0x35 "BlockChange"
       [''Int32 --  Block X
@@ -413,7 +410,7 @@ packetData "Message"
      ] `addField`
      Field { fieldType = strictType isStrict [t|[(Int8,Int8,Int8)]|] --  Relative X,Y,Z of affected blocks
            , fieldGet = [| getCoords |]
-           , fieldPut = \n -> [| putCoords $(n) |]
+           , fieldPut = [| putCoords |]
            }
   , con' 0x64 "OpenWindow"
       [''WindowId
@@ -432,7 +429,7 @@ packetData "Message"
       ] `addField`
       Field { fieldType = strictType isStrict [t|Maybe (ItemId, Int8, Int16)|]
             , fieldGet  = [|getMaybe16 getJ|]
-            , fieldPut  = \n -> [|putMaybe16 putJ $(n)|]
+            , fieldPut  = [|putMaybe16 putJ|]
             } --  Optional block, count, and use
   , con' 0x67 "SetSlot"
       [''WindowId
@@ -440,7 +437,7 @@ packetData "Message"
       ] `addField`
       Field { fieldType = strictType isStrict [t|Maybe (ItemId, Int8, Int16)|]
             , fieldGet  = [|getMaybe16 getJ|]
-            , fieldPut  = \n -> [|putMaybe16 putJ $(n)|]
+            , fieldPut  = [|putMaybe16 putJ|]
             } --  Optional block, count, and use
   , con' 0x68 "WindowItems"
       [''WindowId
@@ -448,9 +445,8 @@ packetData "Message"
       Field { fieldType = strictType isStrict [t|[Maybe (ItemId, Int8, Int16)]|]
             , fieldGet  = [|do n <- getJ :: Get Int16
                                replicateM (fromIntegral n) (getMaybe16 getJ)|]
-            , fieldPut  = \n -> [| do let xs = $(n)
-                                      putJ (fromIntegral (length xs) :: Int16)
-                                      traverse_ (putMaybe16 putJ) xs|]
+            , fieldPut  = [| \ xs -> do putJ (fromIntegral (length xs) :: Int16)
+                                        traverse_ (putMaybe16 putJ) xs|]
             } --  Optional block, count, and use
   , con' 0x69 "UpdateProgressBar"
       [''WindowId

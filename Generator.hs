@@ -6,6 +6,7 @@ import Language.Haskell.TH.Lib
 import Control.Monad
 import Data.List (partition)
 import Data.Maybe (isJust)
+import Data.Binary
 
 import Data.Int
 import Data.Word
@@ -20,7 +21,7 @@ data Member = Member
 data Field = Field
   { fieldType :: StrictTypeQ
   , fieldGet  :: ExpQ
-  , fieldPut  :: ExpQ -> ExpQ
+  , fieldPut  :: ExpQ
   }
 
 addField member field = member { memberFields = memberFields member ++ [field] }
@@ -29,7 +30,7 @@ standardField :: TypeQ -> Field
 standardField ty = Field
   { fieldType = strictType isStrict ty
   , fieldGet  = [| getJ |]
-  , fieldPut  = \ x -> [| putJ $(x)|]
+  , fieldPut  = [| putJ |]
   }
 
 con :: Integer -> String -> [TypeQ] -> Member
@@ -39,11 +40,11 @@ con tag name memberTypes = Member
   , memberFields = map standardField memberTypes
   }
 
-def :: String -> Member
-def name = Member
+def :: TypeQ -> String -> Member
+def ty name = Member
   { memberName = mkName name
   , memberTag  = Nothing
-  , memberFields = [standardField [t| Int8 |]]
+  , memberFields = [standardField ty]
   }
 
 con0 tag name = con tag name []
@@ -51,10 +52,15 @@ con0 tag name = con tag name []
 con' tag name memberNames = con tag name (map conT memberNames)
 
 enum name defaultName xs = packetData name $ [con0 tag n | (tag,n) <- xs]
-                                          ++ [def defaultName]
+                                          ++ [def [t|Int8|] defaultName]
 
-packetData :: String -> [Member] -> Q [Dec]
-packetData typeName members =
+enum16 name defaultName xs = packetData' name [t|Int16|] $ [con0 tag n | (tag,n) <- xs] 
+                                                      ++ [def [t|Int16|] defaultName]
+
+packetData typeName members = packetData' typeName [t|Int8|] members
+
+packetData' :: String -> TypeQ -> [Member] -> Q [Dec]
+packetData' typeName tagType members =
   do let tName = mkName typeName
            
      dataDecl <- dataD
@@ -66,34 +72,34 @@ packetData typeName members =
      instanceDecl <- instanceD
        (cxt [])
        [t| $(conT ''JavaBinary) $(conT tName) |]
-       [ funD 'putJ (map putClause members)
-       , funD 'getJ [getClause members]
+       [ funD 'putJ (map (putClause tagType) members)
+       , funD 'getJ [getClause tagType members]
        ]
      return [dataDecl,instanceDecl]
 
-putClause :: Member -> ClauseQ
-putClause member =
+putClause :: TypeQ -> Member -> ClauseQ
+putClause tagType member =
   do names <- mapM (const (newName "x")) (memberFields member)
   
      let putTag = case memberTag member of
             Nothing -> []
-            Just t  -> [[| putJ (fromIntegral t :: Int8) |]]
+            Just t  -> [[| putJ (fromIntegral t :: $(tagType)) |]]
 
      let body = doE . map noBindS
-              $ putTag ++ [ fieldPut field (varE n)
+              $ putTag ++ [ [| $(fieldPut field) $(varE n) |]
                           | (field,n) <- zip (memberFields member) names]
      clause
        [conP (memberName member) (map varP names)]
        (normalB body)
        []
 
-getClause :: [Member] -> ClauseQ
-getClause members = clause [] (normalB body) []
+getClause :: TypeQ -> [Member] -> ClauseQ
+getClause tagType members = clause [] (normalB body) []
  where
  (tagged, untagged) = partition (isJust . memberTag) members
 
  body = [| do tag <- getJ
-              $(caseE [| tag :: Int8 |]
+              $(caseE [| tag :: $(tagType) |]
                   (map toCase (tagged ++ untagged)))
         |]
 

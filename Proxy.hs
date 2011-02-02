@@ -334,11 +334,11 @@ outboundLogic clientChan serverChan state msg = do
      let (x',y',z') = digShift x y z face shiftCount
      return [PlayerDigging action x' y' z' face]
 
-    PlayerBlockPlacement x y z _ (Just (IID 0x15B, _, _)) -> do
+    PlayerBlockPlacement x y z _ (Just (Clock, _, _)) -> do
       attacked <- glassAttack clientChan state x y z
       return $ if attacked then [] else [msg]
 
-    PlayerBlockPlacement x y z None (Just (IID 0x159, _, _)) -> do
+    PlayerBlockPlacement x y z None (Just (Compass, _, _)) -> do
        restoreMap <- swapMVar (restoreVar state) Map.empty
        bm <- blockMap <$> readMVar (gameState state)
        msgs <- makeRestore bm restoreMap
