@@ -50,16 +50,16 @@ newtype ProgressBarId = PID Int16
 newtype GraphicId = GID Int32
   deriving (Eq, Ord, Show,Read,JavaBinary)
 
-$(enum "InstrumentType"
+enum "InstrumentType"
   "OtherInstrument"
   [ (0, "Harp"       )
   , (1, "DoubleBass" )
   , (2, "SnareDrum"  )
   , (3, "Sticks"     )
   , (4, "BassDrum"   )
-  ])
+  ]
 
-$(enum "Face"
+enum "Face"
   "UnknownFace"
   [ (-1,"None")
   , (0,"Y1")
@@ -68,9 +68,9 @@ $(enum "Face"
   , (3,"Z2")
   , (4,"X1")
   , (5,"X2")
-  ])
+  ]
 
-$(enum "MobId"
+enum "MobId"
   "OtherMob"
   [ (50, "Creeper")
   , (51, "Skeleton")
@@ -85,60 +85,51 @@ $(enum "MobId"
   , (92, "Cow")
   , (93, "Hen")
   , (94, "Squid")
-  ])
+  ]
 
-$(enum "EntityStatus"
+enum "EntityStatus"
   "OtherStatus"
   [ (2,"Damaged")
   , (3,"Died")
-  ])
+  ]
 
-$(enum "InventoryType"
+enum "InventoryType"
   "UnknownInventory"
   [ (0,"BasicInventory")
   , (1,"WorkbenchInventory")
   , (2,"FurnaceInventory")
   , (3,"DispenserInventory")
-  ]) 
+  ]
 
-$(enum "Action"
+enum "Action"
   "ActionOther"
   [ (1,"ActionCrouch")
   , (2,"ActionUncrouch")
-  ])
+  ]
 
-$(enum "Animate"
+enum "Animate"
   "OtherAnimate"
   [ (0,"NoAnimate")
   , (1,"SwingArm")
   , (2,"DamageAnimation")
   , (104,"Crouch")
   , (105,"Uncrouch")
-  ])
+  ]
 
-$(enum "DiggingStatus"
+enum "DiggingStatus"
   "OtherDigging"
   [ (0,"StartedDigging")
   , (1,"Digging")
   , (2,"StoppedDigging")
   , (3,"BlockBroken")
   , (4,"DropItem")
-  ])
+  ]
 
-
-data PrechunkStatus
-  = LoadChunk
-  | UnloadChunk
-  deriving (Read, Show, Eq)
-
-instance JavaBinary PrechunkStatus where
-  getJ = do
-    tag <- getJ :: Get Int8
-    return $! case tag of
-      0 -> UnloadChunk
-      _ -> LoadChunk
-  putJ UnloadChunk = putJ (0 :: Int8)
-  putJ LoadChunk   = putJ (1 :: Int8)
+enum "PrechunkStatus"
+  "OtherPrechunk"
+  [ (0,"UnloadChunk")
+  , (1,"LoadChunk")
+  ]
 
 data Metadata = Metadata [(Int8, MetadataEntry)]
  deriving (Show, Read, Eq)
@@ -184,7 +175,7 @@ instance JavaBinary Metadata where
 highlight :: String -> String
 highlight text = "\194\167\&b" ++ text
 
-$(packetData "Message"
+packetData "Message"
   [ con0 0x00 "KeepAliv" --  Keep alives are sent every 1200 ticks
   , con' 0x01 "LoginRequest"
       [''Int32  --  Protocol Version
@@ -386,7 +377,7 @@ $(packetData "Message"
      ,''Int16 --  Y
      ,''Int32 --  Z
      ] `addField`
-     Field { fieldType = strictType isStrict [t|( Int8, Int8, Int8, [BlockId]
+     Field { fieldType = strictType isStrict [t|Maybe (Int8, Int8, Int8, [BlockId]
                                       , ByteString
                                       , ByteString
                                       , ByteString)|]
@@ -483,7 +474,7 @@ $(packetData "Message"
   , con' 0xff "Disconnect"
       [''String
       ] --  Reason
-  ])
+  ]
 
 toMessages :: ByteString -> [Message]
 toMessages bs = msg : toMessages rest

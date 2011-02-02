@@ -191,8 +191,9 @@ inboundLogic clientChan state msg = do
   glass <- readIORef (glassVar state)
   time  <- readIORef (timeVar state)
   let msg' = case msg of
-               Mapchunk x y z (sx, sy, sz, bs, a, b, c)
-                 | glass -> Mapchunk x y z (sx, sy, sz, map makeGlass bs, a, b, c)
+               Mapchunk x y z (Just (sx, sy, sz, bs, a, b, c))
+                 | glass -> Mapchunk x y z (Just (sx, sy, sz, map makeGlass bs, a, b, c))
+               Mapchunk x y z Nothing -> Chat "Bad map chunk"
                TimeUpdate t -> case time of
                  Nothing -> msg
                  Just t' -> TimeUpdate t'

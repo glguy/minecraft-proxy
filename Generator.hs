@@ -50,8 +50,8 @@ con0 tag name = con tag name []
 
 con' tag name memberNames = con tag name (map conT memberNames)
 
-enum name defaultName xs =
-  packetData name $ [ con tag n [] | (tag,n) <- xs] ++ [def defaultName]
+enum name defaultName xs = packetData name $ [con0 tag n | (tag,n) <- xs]
+                                          ++ [def defaultName]
 
 packetData :: String -> [Member] -> Q [Dec]
 packetData typeName members =
@@ -106,7 +106,7 @@ getClause members = clause [] (normalB body) []
     Nothing -> do
       n <- newName "x"
       match (varP n)
-            (normalB [| return $! $(appE (conE (memberName member)) (varE n)) |])
+            (normalB [| return $! $(conE (memberName member)) $(varE n) |])
             []
 
  rhs conName fields =

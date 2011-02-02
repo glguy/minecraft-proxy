@@ -84,7 +84,7 @@ updateGameState (SpawnPosition x y z) gs
 updateGameState (TimeUpdate t) gs
   = return (Nothing, gs { time = Just t })
 
-updateGameState (Mapchunk x y z (sx, sy, sz, bs, ms, _, _)) gs
+updateGameState (Mapchunk x y z (Just (sx, sy, sz, bs, ms, _, _))) gs
   = do gs' <- updateBlockMap (setChunk x y z sx sy sz bs ms) gs
        return (Nothing, gs')
 

@@ -19,7 +19,7 @@ import qualified Data.ByteString.Lazy.Internal as LI
 
 type BlockLoc = (Int8, Int8, Int8)
 
-$(enum "BlockId"
+enum "BlockId"
   "UnknownBlock"
   [ (0x00,"Air")
   , (0x01,"Stone")
@@ -104,10 +104,10 @@ $(enum "BlockId"
   , (0x5A,"Portal")
   , (0x5B,"JackOLantern")
   , (0x5C,"Cake")
-  ])
+  ]
 
 
-mapchunkDataGet :: Get (Int8,Int8,Int8,[BlockId],ByteString,ByteString,ByteString)
+mapchunkDataGet :: Get (Maybe (Int8,Int8,Int8,[BlockId],ByteString,ByteString,ByteString))
 mapchunkDataGet =
             do (sx,sy,sz) <- getJ
                let block_count = (fromIntegral sx + 1)
@@ -116,14 +116,14 @@ mapchunkDataGet =
                len <- getJ :: Get Int32
                compressed <- getLazyByteString (fromIntegral len)
                return $ case safeDecompress compressed of
-                 Left _ -> error "bad chunk"
+                 Left _ -> Nothing
                  Right uncompressed ->
                   let parser = (,,,,,,) sx sy sz
                            <$> replicateM (fromIntegral block_count) getJ
                            <*> getLazyByteString (block_count `div` 2)
                            <*> getLazyByteString (block_count `div` 2)
                            <*> getLazyByteString (block_count `div` 2)
-                  in runGet parser uncompressed
+                  in Just $ runGet parser uncompressed
 
 -- | Get a lazy ByteString prefixed with a 32-bit length.
 getLazyByteString32 :: Get ByteString
@@ -144,8 +144,9 @@ getMaybe16 p = do
   isNil x = guard (x == (-1))
 
 
-mapchunkDataPut :: (Int8,Int8,Int8,[BlockId],ByteString,ByteString,ByteString) -> Put
-mapchunkDataPut (szx,szy,szz,bs,ms,b,s) = do
+mapchunkDataPut :: Maybe (Int8,Int8,Int8,[BlockId],ByteString,ByteString,ByteString) -> Put
+mapchunkDataPut Nothing = mapchunkDataPut (Just (0,0,0,[Air],L.singleton 0,L.singleton 0,L.singleton 0))
+mapchunkDataPut (Just (szx,szy,szz,bs,ms,b,s)) = do
   putJ szx
   putJ szy
   putJ szz
