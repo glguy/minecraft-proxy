@@ -145,7 +145,8 @@ mapchunkDataGet =
        Left _ -> (chunk,Nothing)
        Right uncompressed ->
          let parser = do (,,,)
-                  <$> (toArray <$> replicateM (fromIntegral block_count) getJ)
+                  <$> (do xs <- replicateM (fromIntegral block_count) getJ
+                          return $! toArray xs)
                   <*> getLazyByteString (block_count `div` 2)
                   <*> getLazyByteString (block_count `div` 2)
                   <*> getLazyByteString (block_count `div` 2)
