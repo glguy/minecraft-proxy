@@ -13,6 +13,7 @@ import Data.Word
 import Data.Bits
 
 import Protocol
+import ProtocolHelper
 
 type EntityMap = Map EntityId (Either String MobId, Int32, Int32, Int32)
 
@@ -83,7 +84,7 @@ updateGameState (SpawnPosition x y z) gs
 updateGameState (TimeUpdate t) gs
   = return (Nothing, gs { time = Just t })
 
-updateGameState (Mapchunk x y z sx sy sz bs ms _ _) gs
+updateGameState (Mapchunk x y z (sx, sy, sz, bs, ms, _, _)) gs
   = do gs' <- updateBlockMap (setChunk x y z sx sy sz bs ms) gs
        return (Nothing, gs')
 
