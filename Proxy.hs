@@ -141,10 +141,8 @@ proxy consoleFile c s = do
   clientChan <- newChan
   serverChan <- newChan
 
-
   let bad who (SomeException e) = print e >> writeChan var who
       start who f xsm = forkIO . handle (bad who) . traverse_ f =<< xsm
-
 
   serverToProxy <- start "inbound"  (inboundLogic clientChan state)             (getMessages s)
   clientToProxy <- start "outbound" (outboundLogic clientChan serverChan state) (getMessages c)
@@ -155,7 +153,7 @@ proxy consoleFile c s = do
   who <- readChan var
   putStr who
   putStrLn " died"
-  traverse_ killThread [serverToProxy, proxyToClient, proxyToServer, clientToProxy]
+  traverse_ killThread [serverToProxy, clientToProxy]
 
 getMessages :: Socket -> IO [Message]
 getMessages s = toMessages <$> getContents s
@@ -175,11 +173,6 @@ inboundLogic ::
   IO ()
 inboundLogic clientChan state msg = do
 
-  case msg of
-   WindowItems {} -> print msg
-   Transaction {} -> print msg
-   SetSlot     {} -> print msg
-   _ -> return ()
   -- Track entities
   changedEid <- modifyMVar (gameState state) $ \ gs -> do
     (change, gs') <- updateGameState msg gs
@@ -236,18 +229,19 @@ processCommand clientChan state "time off"
   = writeIORef (timeVar state) Nothing
   *> tellPlayer clientChan "Time passing"
 
-processCommand clientChan state text
-  | "time " `isPrefixOf` text
+processCommand clientChan state text | "time " `isPrefixOf` text
   = case reads (drop 5 text) of
-      [(n,_)] | 0 <= n && n <= 24000 -> writeIORef (timeVar state) (Just n)
-              *> tellPlayer clientChan "Time fixed"
+
+      [(n,_)] | 0 <= n && n <= 24000
+        -> writeIORef (timeVar state) (Just n)
+        *> tellPlayer clientChan "Time fixed"
+
       _ -> tellPlayer clientChan "Unable to parse time"
 
-processCommand clientChan _ text
-  | "echo " `isPrefixOf` text
+processCommand clientChan _ text | "echo " `isPrefixOf` text
   = case reads (drop 5 text) of
       [(msg,_)] -> sendMessages clientChan [msg]
-      _ -> tellPlayer clientChan "Unable to parse message"
+      _         -> tellPlayer clientChan "Unable to parse message"
 
 processCommand clientChan state "glass on"
   =  writeIORef (glassVar state) True
@@ -275,17 +269,17 @@ processCommand clientChan state "follow off" = do
     mb <- spawnLocation <$> readMVar (gameState state)
     case mb of
       Nothing      -> tellPlayer clientChan "Follow disabled - spawn point unknown"
-      Just (x,y,z) -> do sendMessages clientChan [SpawnPosition x y z]
-                         tellPlayer clientChan "Follow disabled - compass restored"
+      Just (x,y,z) -> sendMessages clientChan [SpawnPosition x y z]
+                   *> tellPlayer clientChan "Follow disabled - compass restored"
     return Nothing
 
 processCommand clientChan state text | "follow " `isPrefixOf` text
   = do e <- entityMap <$> readMVar (gameState state)
+       let key = drop 7 text
        case find (\ (_,(x,_,_,_)) -> x == Left key) (Map.assocs e) of
          Just (k,_) -> swapMVar (followVar state) (Just (key,k))
-                    *>  tellPlayer clientChan "Follow registered"
-         Nothing -> tellPlayer clientChan "Player not found"
-  where key = drop 7 text
+                    *> tellPlayer clientChan "Follow registered"
+         Nothing    -> tellPlayer clientChan "Player not found"
 
 processCommand clientChan state "lines on"
   =  writeIORef (lineVar state) (True, [])
@@ -298,7 +292,8 @@ processCommand clientChan state "lines off"
 processCommand clientChan _ _
   =  tellPlayer clientChan "Command not understood"
 
-
+-- | Serialize a list of messages and write them as one unit to
+-- the specified channel.
 sendMessages :: Chan L.ByteString -> [Message] -> IO ()
 sendMessages _    [] = return ()
 sendMessages chan xs = writeChan chan . runPut . traverse_ putJ $ xs
@@ -313,8 +308,8 @@ outboundLogic :: Chan ByteString {- ^ client channel -} ->
                  IO ()
 outboundLogic clientChan serverChan state msg = do
 
-  (recording, macros) <- readIORef $ lineVar state
-  shiftCount <- readIORef (digThrough state)
+  (recording, macros) <- readIORef (lineVar state)
+  shiftCount          <- readIORef (digThrough state)
 
   msgs <- case msg of
     PlayerPosition {} -> return [msg]
