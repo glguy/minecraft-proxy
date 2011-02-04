@@ -4,10 +4,11 @@ module Generator  where
 import Language.Haskell.TH
 import Control.Monad
 import Data.List (partition)
-import Data.Maybe (isJust)
+import Data.Maybe (isJust,fromJust)
 
 import Data.Int
 import JavaBinary
+import Data.Binary.Get(lookAheadM)
 
 data Member = Member
   { memberName :: Name
@@ -102,22 +103,24 @@ getClause tagType members = clause [] (normalB body) []
  where
  (tagged, untagged) = partition (isJust . memberTag) members
 
- body = [| do tag <- getJ
-              $(caseE [| tag :: $(tagType) |]
-                  (map toCase (tagged ++ untagged)))
+ body = [| do mb <- lookAheadM $
+                 do tag <- getJ
+                    $(caseE [| tag :: $(tagType) |] (
+                        map toCase tagged ++
+                        [ match wildP (normalB [| return Nothing |]) [] ]
+                     ))
+              case mb of
+                Just a  -> return a
+                Nothing -> $(case untagged of
+                               u : _ -> rhs (memberName u) (memberFields u)
+                               []    -> [| fail "Unmatched tag" |]
+                            )
         |]
 
- toCase member = case memberTag member of
-    Just tag -> match (litP (integerL tag))
-                      (normalB (rhs (memberName member)
-                                    (memberFields member)))
-                      []
-
-    Nothing -> do
-      n <- newName "x"
-      match (varP n)
-            (normalB [| return $! $(conE (memberName member)) $(varE n) |])
-            []
+ toCase member = match (litP $ integerL $ fromJust $ memberTag member)
+                       (normalB [| Just `fmap` $(rhs (memberName member)
+                                                     (memberFields member)) |])
+                       []
 
  rhs conName fields =
    do ns <- replicateM (length fields) (newName "x")
