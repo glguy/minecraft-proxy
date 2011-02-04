@@ -261,7 +261,8 @@ packetData "Message"
      ]
   , con' 0x33 "Mapchunk"
      [] `addField`
-     Field { fieldType = strictType isStrict [t|(ChunkLoc,Maybe (Array (Int8, Int8, Int8) BlockId
+     Field { fieldType = strictType isStrict
+                   [t|(ChunkLoc,Maybe ( Array (Int8, Int8, Int8) BlockId
                                       , ByteString
                                       , ByteString
                                       , ByteString))|]
