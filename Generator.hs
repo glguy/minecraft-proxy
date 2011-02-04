@@ -122,4 +122,4 @@ getClause tagType members = clause [] (normalB body) []
  rhs conName fields =
    do ns <- replicateM (length fields) (newName "x")
       doE $ [bindS (varP n) (fieldGet field) | (field,n) <- zip fields ns]
-         ++ [ noBindS [| return $(appsE (conE conName : map varE ns) ) |] ]
+         ++ [ noBindS [| return $! $(appsE (conE conName : map varE ns) ) |] ]

@@ -360,11 +360,15 @@ packetData "Message"
       ] --  Reason
   ]
 
+-- | 'toMessages' will produce a lazy list of 'Message's from a lazy
+-- bytestring of messages encoded according the the Minecraft protocol.
 toMessages :: ByteString -> [Message]
-toMessages bs = msg : toMessages rest
-  where
-  (msg, rest) = runGet (liftA2 (,) getJ getRemainingLazyByteString) bs
+toMessages = runGet $ do
+    empty <- isEmpty
+    if empty then return [] else do
+      x <- getJ
+      rest <- getRemainingLazyByteString
+      return (x : toMessages rest)
 
 proxyChat :: String -> Message
 proxyChat text = Chat $ "\194\167\&6" ++ text
-
