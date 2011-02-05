@@ -19,10 +19,10 @@ import Language.Haskell.TH
 defaultMinecraftPort :: ServiceName
 defaultMinecraftPort = "25565"
 
-data Metadata = Metadata [(Int8, MetadataEntry)]
- deriving (Show, Read, Eq)
+data MetadataEntry = MD Int8 MetadataValue
+  deriving (Show, Read, Eq)
 
-data MetadataEntry
+data MetadataValue
   = MetadataByte Int8
   | MetadataShort Int16
   | MetadataInt Int32
@@ -31,33 +31,37 @@ data MetadataEntry
   | MetadataTriple (Int16, Int8, Int16)
   deriving (Show, Read,Eq)
 
-instance JavaBinary Metadata where
-  getJ = Metadata <$> aux
-    where
-    aux =
-     do tag <- getJ :: Get Int8
-        if tag == 127 then return []
-         else do
-          let ix = tag .&. 0x1f
-          x <- case tag `shiftR` 5 of
-                 0 -> MetadataByte   <$> getJ
-                 1 -> MetadataShort  <$> getJ
-                 2 -> MetadataInt    <$> getJ
-                 3 -> MetadataFloat  <$> getJ
-                 4 -> MetadataString <$> getJ
-                 5 -> MetadataTriple <$> getJ
-                 _ -> error $ "Unknown metadata tag " ++ show tag
-          xs <- aux
-          return ((ix,x) : xs)
+instance JavaBinary MetadataEntry where
+  getJ =
+    do tag <- getJ :: Get Int8
+       let ix = tag .&. 0x1f
+       x <- case tag `shiftR` 5 of
+              0 -> MetadataByte   <$> getJ
+              1 -> MetadataShort  <$> getJ
+              2 -> MetadataInt    <$> getJ
+              3 -> MetadataFloat  <$> getJ
+              4 -> MetadataString <$> getJ
+              5 -> MetadataTriple <$> getJ
+              _ -> error $ "Unknown metadata tag " ++ show tag
+       return (MD ix x)
 
-  putJ (Metadata xs) = traverse_ aux xs *> putJ (127 :: Int8)
+  putJ (MD ix x) = aux ix x
     where putTag ty ix = putJ (ty `shiftL` 5 .|. ix .&. 0x1f)
-          aux (ix, MetadataByte   x) = putTag 0 ix *> putJ x
-          aux (ix, MetadataShort  x) = putTag 1 ix *> putJ x
-          aux (ix, MetadataInt    x) = putTag 2 ix *> putJ x
-          aux (ix, MetadataFloat  x) = putTag 3 ix *> putJ x
-          aux (ix, MetadataString x) = putTag 4 ix *> putJ x
-          aux (ix, MetadataTriple x) = putTag 5 ix *> putJ x
+          aux ix (MetadataByte   x) = putTag 0 ix *> putJ x
+          aux ix (MetadataShort  x) = putTag 1 ix *> putJ x
+          aux ix (MetadataInt    x) = putTag 2 ix *> putJ x
+          aux ix (MetadataFloat  x) = putTag 3 ix *> putJ x
+          aux ix (MetadataString x) = putTag 4 ix *> putJ x
+          aux ix (MetadataTriple x) = putTag 5 ix *> putJ x
+
+
+packetData "Metadata"
+  [con0 0x7f "MDNil"
+  ,untaggedInfix
+     [t| MetadataEntry |]
+     ":|"
+     (conT (mkName "Metadata"))
+  ]
 
 
 highlight :: String -> String
@@ -136,7 +140,7 @@ packetData "Message"
       [''Int32 --  X
       ,''Int8  --  Y
       ,''Int32 --  Z
-      ,''Face 
+      ,''Face
       ] `addField`
       Field { fieldType = strictType isStrict [t|Maybe (ItemId, Int8, Int16)|]
             , fieldGet  = [|getMaybe16 getJ|]
