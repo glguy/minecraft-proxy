@@ -180,6 +180,10 @@ inboundLogic ::
   IO ()
 inboundLogic clientChan state msg = do
 
+  case msg of
+    NamedEntitySpawn _ name _ _ _ _ _ _ ->
+      tellPlayer clientChan $ name ++ " in range"
+    _ -> return ()
   -- Track entities
   changedEid <- modifyMVar (gameState state) $ \ gs -> do
     (change, gs') <- updateGameState msg gs
