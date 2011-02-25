@@ -149,6 +149,13 @@ packetData "Message"
   , con' 0x10 "HoldingChange"
       [''SlotId
       ]
+  , con' 0x11 "UnknownMessage1"
+      [''Int32
+      ,''Int8
+      ,''Int32
+      ,''Int8
+      ,''Int32
+      ]
   , con' 0x12 "Animation"
       [''EntityId --  Player ID
       ,''Animate
@@ -207,6 +214,14 @@ packetData "Message"
       ,''Int32 --  Y
       ,''Int32 --  Z
       ,''GraphicId
+      ]
+  , con' 0x1b "UnknownMessage2"
+      [''Float
+      ,''Float
+      ,''Float
+      ,''Float
+      ,''Bool
+      ,''Bool
       ]
   , con' 0x1c "EntityVelocity"
       [''EntityId
