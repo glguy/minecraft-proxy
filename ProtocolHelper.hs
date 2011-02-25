@@ -130,15 +130,23 @@ enum "BlockId" "UnknownBlock" blocks
 enum16 "ItemId" "OtherItem"   items
 
 
-mapchunkDataGet :: Get (ChunkLoc, Maybe (Array (Int8,Int8,Int8) BlockId,ByteString,ByteString,ByteString))
+
+coords bx by bz sx sy sz = do -- The x z y order is intentional
+  x' <- take (fromIntegral sx + 1) [fromIntegral bx ..]
+  z' <- take (fromIntegral sz + 1) [fromIntegral bz ..]
+  y' <- take (fromIntegral sy + 1) [fromIntegral by ..]
+  return (x',y',z')
+
+mapchunkDataGet :: Get (ChunkLoc, Maybe (Array (Int8,Int8,Int8) BlockId,
+                                         ByteString,ByteString,ByteString))
 mapchunkDataGet =
   do (x,y,z,sx,sy,sz) <- getJ :: Get (Int32, Int16, Int32, Int8, Int8, Int8)
      let (chunk,(bx,by,bz)) = decomposeCoords x (fromIntegral y) z
      let block_count = (fromIntegral sx + 1)
                      * (fromIntegral sy + 1)
                      * (fromIntegral sz + 1)
-         toArray :: [BlockId] -> Array (Int8,Int8,Int8) BlockId
-         toArray xs = array ((bx,by,bz),(bx+sx,by+sy,bz+sz)) (zip (coords bx by bz sx sy sz) xs)
+         toArray xs = array ((bx,by,bz),(bx+sx,by+sy,bz+sz))
+                            (zip (coords bx by bz sx sy sz) xs)
      len <- getJ :: Get Int32
      compressed <- getLazyByteString (fromIntegral len)
      return $! case safeDecompress compressed of
@@ -152,29 +160,10 @@ mapchunkDataGet =
                   <*> getLazyByteString (block_count `div` 2)
          in (chunk,Just $ runGet parser uncompressed)
 
-coords bx by bz sx sy sz = do -- The x z y order is intentional
-  x' <- take (fromIntegral sx + 1) [fromIntegral bx ..]
-  z' <- take (fromIntegral sz + 1) [fromIntegral bz ..]
-  y' <- take (fromIntegral sy + 1) [fromIntegral by ..]
-  return (x',y',z')
 
-
-putMaybe16 :: (a -> Put) -> Maybe a -> Put
-putMaybe16 _ Nothing = putJ( -1 :: Int16)
-putMaybe16 p (Just x) = p x
-
-getMaybe16 :: Get a -> Get (Maybe a)
-getMaybe16 p = do
-  mb <- lookAheadM $ isNil <$> getJ
-  case mb of
-    Nothing -> Just <$> p
-    Just () -> return Nothing
-  where
-  isNil :: Int16 -> Maybe ()
-  isNil x = guard (x == (-1))
-
-
-mapchunkDataPut :: (ChunkLoc,Maybe (Array (Int8,Int8,Int8) BlockId,ByteString,ByteString,ByteString)) -> Put
+mapchunkDataPut :: (ChunkLoc, Maybe (Array (Int8,Int8,Int8) BlockId, 
+                                     ByteString,ByteString,ByteString)) ->
+                   Put
 mapchunkDataPut ((cx,cz),mbRest) =
   do let (blockArr, metas, blights, slights) = case mbRest of
            Nothing -> error "Can't put bad chunk"
@@ -203,6 +192,21 @@ mapchunkDataPut ((cx,cz),mbRest) =
                                        *> putLazyByteString slights
      putWord32be (fromIntegral (L.length compressed))
      putLazyByteString compressed
+
+putMaybe16 :: (a -> Put) -> Maybe a -> Put
+putMaybe16 _ Nothing = putJ( -1 :: Int16)
+putMaybe16 p (Just x) = p x
+
+getMaybe16 :: Get a -> Get (Maybe a)
+getMaybe16 p = do
+  mb <- lookAheadM $ isNil <$> getJ
+  case mb of
+    Nothing -> Just <$> p
+    Just () -> return Nothing
+  where
+  isNil :: Int16 -> Maybe ()
+  isNil x = guard (x == (-1))
+
 
 putChanges :: [((Int8,Int8,Int8),BlockId, Int8)] -> Put
 putChanges xs = do
@@ -244,7 +248,9 @@ putCoords xs = do
 
 safeDecompress :: ByteString -> Either String ByteString
 safeDecompress
-  = ZI.foldDecompressStream (fmap . LI.Chunk) (Right LI.Empty) (\ _ str -> Left str)
+  = ZI.foldDecompressStream (fmap . LI.Chunk)
+                            (Right LI.Empty)
+                            (\ _ str -> Left str)
   . ZI.decompressWithErrors ZI.zlibFormat ZI.defaultDecompressParams
 
 -- | 'decomposeCoords' computes the chunk coordinates and the

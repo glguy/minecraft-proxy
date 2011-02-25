@@ -87,7 +87,8 @@ main = withSocketsDo $ do
                                  , addrFlags      = [AI_ADDRCONFIG] }
   serverAI <- head <$> getAddrInfo (Just activeHints) (Just host) (Just port)
 
-  waitThreadGroup $ map (makeListenerThread (configConsoleFile config) serverAI) proxyAIs
+  waitThreadGroup $
+     map (makeListenerThread (configConsoleFile config) serverAI) proxyAIs
 
 
 -- | 'makeListenerThread' binds to the specified address on the proxy
@@ -103,11 +104,13 @@ makeListenerThread consoleFile serverAI proxyAI = do
   bindSocketToAddrInfo l proxyAI
   listen l 5
 
-  putStr $ "Ready to accept connections on " ++ show (addrAddress proxyAI) ++ "\n"
+  putStr $ "Ready to accept connections on "
+        ++ show (addrAddress proxyAI) ++ "\n"
 
-  forever $ do (clientSock, clientAddr) <- accept l
-               _ <- forkIO (handleClient consoleFile serverAI clientSock clientAddr)
-               return ()
+  forever $
+    do (clientSock, clientAddr) <- accept l
+       _ <- forkIO (handleClient consoleFile serverAI clientSock clientAddr)
+       return ()
 
 handleClient ::
   Maybe FilePath {- ^ console file path -} ->
@@ -144,11 +147,15 @@ proxy consoleFile c s = do
   let bad who (SomeException e) = print e >> writeChan var who
       start who f xsm = forkIO . handle (bad who) . traverse_ f =<< xsm
 
-  serverToProxy <- start "inbound"  (inboundLogic clientChan state)             (getMessages s)
-  clientToProxy <- start "outbound" (outboundLogic clientChan serverChan state) (getMessages c)
 
-  proxyToClient <- start "inbound network"  (sendAll c) (getChanContents clientChan)
-  proxyToServer <- start "outbound network" (sendAll s) (getChanContents serverChan)
+  serverToProxy <- start "from server"
+                     (inboundLogic clientChan state)
+                     (getMessages s)
+  clientToProxy <- start "from client"
+                     (outboundLogic clientChan serverChan state)
+                     (getMessages c)
+  proxyToClient <- start "to client"  (sendAll c) (getChanContents clientChan)
+  proxyToServer <- start "to server" (sendAll s) (getChanContents serverChan)
 
   who <- readChan var
   putStr who
@@ -173,6 +180,10 @@ inboundLogic ::
   IO ()
 inboundLogic clientChan state msg = do
 
+  case msg of
+    NamedEntitySpawn _ name _ _ _ _ _ _ ->
+      tellPlayer clientChan $ name ++ " in range"
+    _ -> return ()
   -- Track entities
   changedEid <- modifyMVar (gameState state) $ \ gs -> do
     (change, gs') <- updateGameState msg gs
@@ -182,13 +193,13 @@ inboundLogic clientChan state msg = do
   glass <- readIORef (glassVar state)
   time  <- readIORef (timeVar state)
   let msg' = case msg of
-               Mapchunk (chunk, Just (bs, a, b, c))
-                 | glass -> Mapchunk (chunk, Just (fmap makeGlass bs, a, b, c))
-               Mapchunk (chunk, Nothing) -> Chat $ "Bad map chunk " ++ show chunk
-               TimeUpdate {} -> case time of
-                 Nothing -> msg
-                 Just t -> TimeUpdate t
-               _ -> msg
+        Mapchunk (chunk, Just (bs, a, b, c))
+          | glass -> Mapchunk (chunk, Just (fmap makeGlass bs, a, b, c))
+        Mapchunk (chunk, Nothing) -> Chat $ "Bad map chunk " ++ show chunk
+        TimeUpdate {} -> case time of
+          Nothing -> msg
+          Just t -> TimeUpdate t
+        _ -> msg
 
   -- Update compass
   followMsgs <- withMVar (followVar state) $ \ interested ->
@@ -268,7 +279,7 @@ processCommand clientChan state "follow off" = do
   modifyMVar_ (followVar state) $ \ _ -> do
     mb <- spawnLocation <$> readMVar (gameState state)
     case mb of
-      Nothing      -> tellPlayer clientChan "Follow disabled - spawn point unknown"
+      Nothing -> tellPlayer clientChan "Follow disabled - spawn point unknown"
       Just (x,y,z) -> sendMessages clientChan [SpawnPosition x y z]
                    *> tellPlayer clientChan "Follow disabled - compass restored"
     return Nothing
@@ -402,9 +413,12 @@ drawLine :: Message ->
   Maybe (ItemId, Int8, Int16) {- ^ Hand contents -} ->
   [Message]
 drawLine msg x y z x1 y1 z1 f o
-  | x == x1 && y == y1 = [PlayerBlockPlacement x y z2 f o | z2 <- [min z z1 .. max z z1]]
-  | x == x1 && z == z1 = [PlayerBlockPlacement x y2 z f o | y2 <- [min y y1 .. max y y1]]
-  | z == z1 && y == y1 = [PlayerBlockPlacement x2 y z f o | x2 <- [min x x1 .. max x x1]]
+  | x == x1 && y == y1 = [PlayerBlockPlacement x y z2 f o
+                             | z2 <- [min z z1 .. max z z1]]
+  | x == x1 && z == z1 = [PlayerBlockPlacement x y2 z f o
+                             | y2 <- [min y y1 .. max y y1]]
+  | z == z1 && y == y1 = [PlayerBlockPlacement x2 y z f o
+                             | x2 <- [min x x1 .. max x x1]]
   | otherwise          = [msg]
 
 lookupBlock :: BlockMap -> ChunkLoc -> BlockLoc -> IO (Maybe BlockId)
@@ -412,7 +426,11 @@ lookupBlock bm chunkC blockC = do
   for (Map.lookup chunkC bm) $ \ (blockArray, _) ->
     readArray blockArray blockC
 
-filterGlassUpdate :: BlockMap -> BlockId -> (ChunkLoc, [BlockLoc]) -> IO (ChunkLoc, [BlockLoc])
+filterGlassUpdate ::
+  BlockMap ->
+  BlockId ->
+  (ChunkLoc, [BlockLoc]) ->
+  IO (ChunkLoc, [BlockLoc])
 filterGlassUpdate bm victim (chunk, blocks) = do
   let isVictim x = x == Just victim
   xs <- filterM (\ c -> isVictim <$> lookupBlock bm chunk c) blocks
@@ -551,8 +569,10 @@ waitThreadGroup ::
   IO ()
 waitThreadGroup xs = do
   var <- newEmptyMVar
-  threadIds <- for xs $ \ x -> forkIO $ x `Control.Exception.catch`
-                                          \ (SomeException e) -> print e >> putMVar var ()
+  threadIds <- for xs $ \ x -> forkIO $ x
+                   `catch` \ (SomeException e) -> 
+                     do print e
+                        putMVar var ()
   takeMVar var
   traverse_ killThread threadIds
 
